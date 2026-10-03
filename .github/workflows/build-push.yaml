@@ -1,0 +1,68 @@
+# Build the custom MLflow image (official mlflow:v3.16.1-full + the vendored
+# mlflow-oidc-auth plugin) and push it to Docker Hub.
+#
+#   * push to `main`      -> docker.io/thoaikhmt/mlflow-azure-auth:latest
+#   * push a `v*` git tag -> docker.io/thoaikhmt/mlflow-azure-auth:<tag>
+#                             (first release: v1.0.0)
+#
+# Only those tags are pushed: `latest` is moved on every main build, and a tag
+# build publishes the tag name once. No `sha-<short>` tags.
+#
+# The image is built with Docker's daemon builder (`DOCKER_BUILDKIT=0 docker
+# build` + `docker push`), which emits a plain Docker schema2 manifest: no OCI
+# index and no `unknown/unknown` provenance attestation. That is what
+# pull-through proxies such as Nexus need (an attestation makes them fail with
+# "could not fetch content descriptor ... not found").
+#
+# This mirrors `.gitea/workflows/build-push.yaml`; the only difference is that
+# GitHub's runner image already trusts the public registries, so the
+# Gitea-specific `GIT_SSL_NO_VERIFY` workaround is not needed here.
+name: build-and-push
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-and-push-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: docker.io/thoaikhmt/mlflow-azure-auth
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        run: |
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" \
+            | docker login docker.io \
+                --username "${{ secrets.DOCKERHUB_USERNAME }}" \
+                --password-stdin
+
+      - name: Build and push
+        run: |
+          set -euo pipefail
+          ref="${{ github.ref }}"
+          case "$ref" in
+            refs/tags/*) tag="${ref#refs/tags/}" ;;
+            refs/heads/main) tag="latest" ;;
+            *) echo "unsupported ref: ${ref}" >&2; exit 1 ;;
+          esac
+          echo "==> building and pushing ${IMAGE}:${tag}"
+          DOCKER_BUILDKIT=0 docker build \
+            --file Containerfile \
+            --tag "${IMAGE}:${tag}" \
+            .
+          docker push "${IMAGE}:${tag}"
