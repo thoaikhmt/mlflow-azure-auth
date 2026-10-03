@@ -15,7 +15,7 @@ mlflow-oidc-auth/          vendored plugin source (see "Vendored plugin" below)
 test/mock-azure/config.json  simulated Entra ID tenant
 test/run-integration.sh    spins up MLflow + the mock and runs the test
 test/azure_sso_test.py     the assertions (login, groups, admin, denials, UI)
-.gitea/workflows/          build, push to Docker Hub, run the integration test
+.gitea/workflows/          build and push the image to Docker Hub
 ```
 
 ## Image
