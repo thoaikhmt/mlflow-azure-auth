@@ -11,16 +11,16 @@
 # build `xmlsec` from source and the `-full` image lacks the dev headers, and
 # Entra ID SSO is plain OIDC.
 #
-# The plugin is VENDORED under ./mlflow-oidc-auth (a copy of the
-# thoaikhmt/mlflow-oidc-auth fork at b8f0f67, which fixes --static-prefix
-# handling in `_prefix.py`) so we own and can patch it. Installing straight from
-# the GitHub source tarball silently shipped NO admin UI: `mlflow_oidc_auth/ui`
-# is the React build output, is git-ignored, and is not part of the archive, so
-# `pip install` produced a wheel without it and every `/oidc/ui/*` request died
-# with `RuntimeError: UI directory not found`. The `ui` stage below builds the
-# frontend first; the runtime stage installs the plugin from source with the
-# built assets in place. We also fixed `hack/menu.html`, whose relative
-# `oidc/ui/user` / `logout` links resolved under /mlflow and 404'd.
+# The plugin source is VENDORED under ./mlflow-oidc-auth so we own and can patch
+# it (including the --static-prefix handling in `_prefix.py`). Installing
+# straight from an upstream source tarball silently shipped NO admin UI:
+# `mlflow_oidc_auth/ui` is the React build output, is git-ignored, and is not in
+# the archive, so `pip install` produced a wheel without it and every
+# `/oidc/ui/*` request died with `RuntimeError: UI directory not found`. The
+# `ui` stage below builds the frontend first; the runtime stage installs the
+# plugin from source with the built assets in place. We also fixed
+# `hack/menu.html`, whose relative `oidc/ui/user` / `logout` links resolved
+# under /mlflow and 404'd.
 
 # ── Stage 1: build the React admin UI into mlflow_oidc_auth/ui ──────────────
 # Vite is configured with `outDir: ../mlflow_oidc_auth/ui`, so building from

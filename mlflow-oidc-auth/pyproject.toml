@@ -6,10 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "mlflow-oidc-auth"
 dynamic = ["version"]
 description = "Authentication and access control for MLflow: SSO (OIDC, SAML), SCIM provisioning and per-resource permissions"
-readme = "README.md"
 keywords = ["mlflow", "access-control", "authentication", "authorization", "oidc", "oauth2", "saml", "scim", "sso", "rbac"]
-license = "Apache-2.0"
-license-files = ["LICENSE"]
 
 classifiers = [
   "Development Status :: 5 - Production/Stable",
@@ -97,16 +94,6 @@ full = [
 cache = [
   "redis>=5.0.0,<6",
 ]
-
-[[project.maintainers]]
-name = "Alexander Kharkevich"
-email = "alex@kharkevich.org"
-
-[project.urls]
-homepage = "https://github.com/mlflow-oidc/mlflow-oidc-auth"
-issues = "https://github.com/mlflow-oidc/mlflow-oidc-auth/issues"
-documentation = "https://github.com/mlflow-oidc/mlflow-oidc-auth/tree/main/docs/"
-repository = "https://github.com/mlflow-oidc/mlflow-oidc-auth"
 
 [project.scripts]
 mlflow-oidc-server = "mlflow_oidc_auth.cli:run"

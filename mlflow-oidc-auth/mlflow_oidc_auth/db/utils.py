@@ -16,7 +16,7 @@ def _get_alembic_config(url: str) -> Config:
     alembic_ini_path = alembic_dir / "alembic.ini"
     alembic_cfg = Config(alembic_ini_path)
     alembic_cfg.set_main_option("script_location", str(alembic_dir))
-    url = url.replace("%", "%%")  # Same as here: https://github.com/mlflow/mlflow/issues/1487
+    url = url.replace("%", "%%")  # Escape % for the Alembic ini parser
     alembic_cfg.set_main_option("sqlalchemy.url", url)
     # Every caller of this helper is running Alembic *inside* an already-running process, so
     # env.py must not apply the .ini's logging sections: fileConfig replaces the root handlers

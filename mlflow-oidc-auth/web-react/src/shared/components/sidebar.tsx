@@ -3,7 +3,7 @@ import { AppLink } from "./app-link";
 import { getSidebarData } from "./sidebar-data";
 import type { CurrentUser } from "../types/user";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faAnglesLeft, faHeart } from "@fortawesome/free-solid-svg-icons";
+import { faAnglesLeft } from "@fortawesome/free-solid-svg-icons";
 import { Button } from "./button";
 import { useRuntimeConfig } from "../context/use-runtime-config";
 import { WorkspacePicker } from "./workspace-picker";
@@ -102,34 +102,6 @@ const Sidebar: React.FC<SidebarProps> = ({
               </React.Fragment>
             );
           })}
-          <AppLink
-            href="https://github.com/sponsors/mlflow-oidc?o=esb"
-            isInternalLink={false}
-            className={`
-              mt-auto
-              text-text-primary hover:text-text-primary-hover dark:text-text-primary-dark dark:hover:text-text-primary-hover-dark cursor-pointer
-              font-medium rounded-md transition-colors w-full p-0
-              ${isOpen ? "justify-start" : "justify-center"}
-            `}
-          >
-            <div className="flex items-center p-1">
-              <span className={isOpen ? "w-5" : "w-full flex"}>
-                <FontAwesomeIcon
-                  icon={faHeart}
-                  size="1x"
-                  className="color-text-btn-secondary"
-                />
-              </span>
-              <span
-                className={`
-                  whitespace-nowrap
-                  ${isOpen ? "opacity-100 max-w-xs ml-2" : "opacity-0 max-w-0"}
-                `}
-              >
-                Support the project
-              </span>
-            </div>
-          </AppLink>
         </nav>
 
         <div className="p-2 border-t border-btn-secondary-border dark:border-btn-secondary-border-dark ">

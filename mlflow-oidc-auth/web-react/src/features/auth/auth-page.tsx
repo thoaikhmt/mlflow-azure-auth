@@ -1,10 +1,7 @@
 import { useRuntimeConfig } from "../../shared/context/use-runtime-config";
 import { useAuthErrors } from "./hooks/use-auth-errors";
 import { Button } from "../../shared/components/button";
-import {
-  faHeart,
-  faExclamationCircle,
-} from "@fortawesome/free-solid-svg-icons";
+import { faExclamationCircle } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import DarkModeToggle from "../../shared/components/dark-mode-toggle";
 import { useProviders } from "./hooks/use-providers";
@@ -45,8 +42,6 @@ export const AuthPage = () => {
     providers.length === 1 && providers[0].type === "saml"
       ? providers[0]
       : null;
-
-  const currentYear = new Date().getFullYear();
 
   return (
     <div
@@ -132,30 +127,6 @@ export const AuthPage = () => {
         </div>
       </div>
 
-      <footer className="w-full py-6 px-6 md:px-10 text-sm text-ui-text/60 dark:text-ui-text-dark/40">
-        <div className="mx-auto w-full max-w-5xl flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <a
-            href="https://kharkevich.com/"
-            target="_blank"
-            rel="noopener"
-            className="inline-flex items-center gap-3 hover:text-ui-text dark:hover:text-ui-text-dark transition-colors"
-          >
-            &copy; {currentYear} Kharkevich Engineering Lab
-          </a>
-          <a
-            href="https://github.com/sponsors/mlflow-oidc?o=esb"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-3 hover:text-ui-text dark:hover:text-ui-text-dark transition-colors sm:justify-end"
-          >
-            <FontAwesomeIcon
-              icon={faHeart}
-              className="color-text-btn-secondary"
-            />
-            <span>Support the project</span>
-          </a>
-        </div>
-      </footer>
     </div>
   );
 };

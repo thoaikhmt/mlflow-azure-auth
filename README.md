@@ -1,7 +1,6 @@
 # mlflow-azure-sso
 
-Custom [MLflow](https://mlflow.org/) tracking-server image that adds the
-[`mlflow-oidc-auth`](https://github.com/mlflow-oidc/mlflow-oidc-auth) plugin so
+Custom MLflow tracking-server image that adds the `mlflow-oidc-auth` plugin so
 the server can authenticate against **Azure Entra ID** (OpenID Connect) instead
 of only MLflow's built-in basic auth.
 
@@ -11,18 +10,18 @@ a **simulated Entra ID** service plus an end-to-end integration test that drives
 the real Authorization Code + PKCE flow.
 
 ```
-Containerfile          official mlflow:v3.16.1-full + vendored mlflow-oidc-auth
-mlflow-oidc-auth/      vendored plugin source (fork, see "Vendored plugin" below)
-mock-azure/config.json simulated Entra ID tenant (navikt/mock-oauth2-server)
-test/run-integration.sh spins up MLflow + the mock and runs the test
-test/azure_sso_test.py  the assertions (login, groups, admin, denials, UI)
-.gitea/workflows/       build, push to Gitea, run the integration test
+Containerfile              official mlflow:v3.16.1-full + vendored mlflow-oidc-auth
+mlflow-oidc-auth/          vendored plugin source (see "Vendored plugin" below)
+test/mock-azure/config.json  simulated Entra ID tenant
+test/run-integration.sh    spins up MLflow + the mock and runs the test
+test/azure_sso_test.py     the assertions (login, groups, admin, denials, UI)
+.gitea/workflows/          build, push to Gitea, run the integration test
 ```
 
 ## Image
 
 ```
-gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.5
+gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.6
 ```
 
 Built and pushed by the Gitea Actions workflow on every push to `main`. It is
@@ -31,14 +30,14 @@ the official `ghcr.io/mlflow/mlflow:v3.16.1-full` image plus:
 | Component          | Version |
 | ------------------ | ------- |
 | MLflow             | 3.16.1 (pinned, `-full`) |
-| mlflow-oidc-auth   | vendored fork @ `b8f0f67` (`mlflow-oidc-auth/`) |
+| mlflow-oidc-auth   | vendored (`mlflow-oidc-auth/`) |
 | psycopg2 / boto3   | from the `-full` base |
 
 ### Vendored plugin
 
-The plugin source is **vendored** under `mlflow-oidc-auth/` (a copy of the
-`thoaikhmt/mlflow-oidc-auth` fork) instead of being pip-installed from a GitHub
-archive. Installing from the archive silently shipped **no admin UI**:
+The plugin source is **vendored** under `mlflow-oidc-auth/` instead of being
+pip-installed from an upstream source archive. Installing from the archive
+silently shipped **no admin UI**:
 `mlflow_oidc_auth/ui` is the React build output, is git-ignored, and is not in
 the archive, so the wheel had no `ui/` directory and every `/oidc/ui/*` request
 died with `RuntimeError: UI directory not found` (HTTP 500) — the "Permissions"
@@ -47,7 +46,7 @@ stage (Vite writes to `mlflow_oidc_auth/ui`) and installs the plugin from the
 vendored source with those assets in place; a build-time assertion fails the
 build if `ui/index.html` is missing from the installed package.
 
-Two patches are carried on top of the fork:
+Two patches are carried on top of the vendored source:
 
 - `mlflow_oidc_auth/routers/_prefix.py` — under `--static-prefix`,
   `_get_rest_path()` already includes the prefix, so the old code derived the
@@ -61,17 +60,16 @@ Two patches are carried on top of the fork:
   became `/mlflow/oidc/ui/user` (404) and `/mlflow/logout`. The plugin's fixed
   routes live at the server root, so the hrefs are now root-absolute.
 
-Bump the vendored copy by re-syncing `mlflow-oidc-auth/` from the fork and
-re-applying the patches above.
+Bump the vendored copy by re-syncing `mlflow-oidc-auth/` and re-applying the
+patches above.
 
 ## Integration test (simulated Azure Entra ID)
 
-The test uses [`navikt/mock-oauth2-server`](https://github.com/navikt/mock-oauth2-server)
-configured as an Entra-ID-shaped tenant:
+The test uses `mock-oauth2-server` configured as an Entra-ID-shaped tenant:
 
 - issuer `http://mock-azure:8080/11111111-2222-3333-4444-555555555555`
 - the login **username** selects an Entra-shaped claim set from
-  `mock-azure/config.json` (`oid`, `upn`, `preferred_username`, `given_name`,
+  `test/mock-azure/config.json` (`oid`, `upn`, `preferred_username`, `given_name`,
   `family_name`, `name`, `groups`, `tid`). Like real Entra ID, `groups` carries
   group **object IDs** (GUIDs), and the account key is the `oid` claim.
 
@@ -132,7 +130,7 @@ docker run --rm -p 5000:5000 \
   -e OIDC_USERS_DB_URI="postgresql+psycopg2://mlflow:pass@db:5432/mlflow" \
   -e OIDC_ALEMBIC_VERSION_TABLE="oidc_alembic_version" \
   -e SECRET_KEY="$(openssl rand -hex 32)" \
-  gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.5 \
+  gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.6 \
   mlflow server --app-name oidc-auth --host 0.0.0.0 --port 5000 \
     --backend-store-uri postgresql:// --default-artifact-root s3://mlflow/
 ```

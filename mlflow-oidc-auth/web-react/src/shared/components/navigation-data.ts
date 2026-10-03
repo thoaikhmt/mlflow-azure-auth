@@ -16,17 +16,7 @@ export const getNavigationData = (
   userName: string,
   basePath: string,
 ): NavigationData => ({
-  mainLinks: [
-    { label: "MLFlow", href: `${basePath}/` },
-    {
-      label: "GitHub",
-      href: "https://github.com/mlflow-oidc/mlflow-oidc-auth",
-    },
-    {
-      label: "Docs",
-      href: "https://mlflow-oidc.github.io/mlflow-oidc-auth/#/",
-    },
-  ],
+  mainLinks: [{ label: "MLFlow", href: `${basePath}/` }],
   userControls: [
     { label: `Hello, ${userName}`, href: "/user", isInternalLink: true },
     { label: "Logout", href: `${basePath}/logout` },

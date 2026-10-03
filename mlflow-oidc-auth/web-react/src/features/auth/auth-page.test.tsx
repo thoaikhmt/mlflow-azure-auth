@@ -69,24 +69,6 @@ describe("AuthPage", () => {
     expect(alertDiv).toHaveClass("bg-red-100");
   });
 
-  it("renders footer with copyright and sponsor link", () => {
-    render(<AuthPage />);
-
-    const currentYear = new Date().getFullYear();
-    expect(
-      screen.getByText(
-        new RegExp(`© ${currentYear} Kharkevich Engineering Lab`),
-      ),
-    ).toBeInTheDocument();
-
-    const sponsorLink = screen.getByText("Support the project");
-    expect(sponsorLink).toBeInTheDocument();
-    expect(sponsorLink.closest("a")).toHaveAttribute(
-      "href",
-      "https://github.com/sponsors/mlflow-oidc?o=esb",
-    );
-  });
-
   it("renders dark mode toggle", () => {
     render(<AuthPage />);
     expect(screen.getByTestId("dark-mode-toggle")).toBeInTheDocument();

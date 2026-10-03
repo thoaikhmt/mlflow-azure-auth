@@ -5,7 +5,7 @@ describe("navigation-data", () => {
   it("returns correct navigation structure", () => {
     const data = getNavigationData("testuser", "/base");
 
-    expect(data.mainLinks).toHaveLength(3);
+    expect(data.mainLinks).toHaveLength(1);
     expect(data.mainLinks[0].href).toBe("/base/");
 
     expect(data.userControls).toHaveLength(2);

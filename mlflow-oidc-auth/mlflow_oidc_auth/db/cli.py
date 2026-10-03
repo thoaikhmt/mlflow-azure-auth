@@ -181,9 +181,9 @@ def reconcile_ownership(
     """Change which source owns user rows (issue #319).
 
     **Dry run unless ``--apply`` is given**, and it never runs implicitly — not at startup, not
-    on a configuration change, not as a side effect of anything. Grafana shipped a silent runtime
-    branch that reset existing users ([grafana#73752](https://github.com/grafana/grafana/issues/73752));
-    the lesson is that ownership changes are an operator action with a diff they read first.
+    on a configuration change, not as a side effect of anything. A silent runtime branch that
+    reset existing users is exactly the failure to avoid; ownership changes must be an operator
+    action with a diff they read first.
 
     The diff a dry run prints is the diff an apply performs: both come from the same query, so
     what you approve is what runs.

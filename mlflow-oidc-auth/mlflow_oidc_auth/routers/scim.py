@@ -659,7 +659,6 @@ async def scim_service_provider_config(request: Request) -> JSONResponse:
     return scim_response(
         {
             "schemas": [SERVICE_PROVIDER_CONFIG_SCHEMA],
-            "documentationUri": "https://github.com/mlflow-oidc/mlflow-oidc-auth/blob/main/docs/scim.md",
             "patch": {"supported": True},
             "bulk": {"supported": False, "maxOperations": 0, "maxPayloadSize": 0},
             "filter": {"supported": True, "maxResults": MAX_PAGE_SIZE},

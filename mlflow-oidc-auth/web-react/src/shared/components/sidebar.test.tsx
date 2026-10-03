@@ -138,26 +138,6 @@ describe("Sidebar", () => {
     expect(handleToggle).toHaveBeenCalled();
   });
 
-  it("renders sponsor link", () => {
-    render(
-      <MemoryRouter>
-        <Sidebar
-          currentUser={null}
-          isOpen={true}
-          toggleSidebar={() => {}}
-          widthClass="w-64"
-        />
-      </MemoryRouter>,
-    );
-
-    const sponsorLink = screen.getByText("Support the project");
-    expect(sponsorLink).toBeInTheDocument();
-    expect(sponsorLink.closest("a")).toHaveAttribute(
-      "href",
-      "https://github.com/sponsors/mlflow-oidc?o=esb",
-    );
-  });
-
   it("renders AI Gateway links when enabled", () => {
     mockRuntimeConfig.gen_ai_gateway_enabled = true;
     render(

@@ -17,8 +17,8 @@ identity:
 ``group_sync`` / ``group_sync_mode``
     Whether claims refresh group membership, and whether they *replace* it. ``authoritative``
     genuinely removes memberships the claims no longer assert — Keycloak's ``FORCE`` mapper is
-    add-only in practice ([keycloak#36578](https://github.com/keycloak/keycloak/issues/36578)),
-    so a deployment that expects revocation to propagate has to get it from here.
+    add-only in practice, so a deployment that expects revocation to propagate has to get it
+    from here.
 
 ``admin_source``
     ``claims`` reads the admin group from the token as before; ``none`` means this provider can

@@ -16,7 +16,7 @@ that MLflow:
     a `--static-prefix`.
 
 The mock maps the login *username* to Entra claims (`groups`, `email`, ...) via
-``mock-azure/config.json``; the tenant/issuer is shaped like a real Entra ID
+``test/mock-azure/config.json``; the tenant/issuer is shaped like a real Entra ID
 tenant. See the README for how to point the same config at a real tenant.
 """
 

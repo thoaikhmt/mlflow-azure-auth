@@ -54,7 +54,7 @@ echo "==> creating network $NET"
 
 echo "==> starting simulated Azure Entra ID (mock-oauth2-server)"
 "$ENGINE" run -d --name mock-azure --network "$NET" \
-  -v "$ROOT_DIR/mock-azure/config.json:/config.json:$MOUNT_OPTS" \
+  -v "$ROOT_DIR/test/mock-azure/config.json:/config.json:$MOUNT_OPTS" \
   -e JSON_CONFIG_PATH=/config.json \
   "$MOCK_IMAGE" >/dev/null
 
