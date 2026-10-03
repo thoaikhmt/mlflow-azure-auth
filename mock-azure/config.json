@@ -1,0 +1,44 @@
+{
+  "interactiveLogin": true,
+  "httpServer": "MockWebServerWrapper",
+  "tokenCallbacks": [
+    {
+      "issuerId": "11111111-2222-3333-4444-555555555555",
+      "tokenExpiry": 3600,
+      "requestMappings": [
+        {
+          "requestParam": "subject",
+          "match": "alice",
+          "claims": {
+            "sub": "alice-subject",
+            "tid": "11111111-2222-3333-4444-555555555555",
+            "email": "alice@contoso.example",
+            "preferred_username": "alice@contoso.example",
+            "name": "Alice Example",
+            "groups": ["mlflow-users"]
+          }
+        },
+        {
+          "requestParam": "subject",
+          "match": "admin",
+          "claims": {
+            "sub": "admin-subject",
+            "tid": "11111111-2222-3333-4444-555555555555",
+            "email": "admin@contoso.example",
+            "preferred_username": "admin@contoso.example",
+            "name": "Admin Example",
+            "groups": ["mlflow-users", "mlflow-admins"]
+          }
+        },
+        {
+          "requestParam": "subject",
+          "match": ".*",
+          "claims": {
+            "tid": "11111111-2222-3333-4444-555555555555",
+            "groups": []
+          }
+        }
+      ]
+    }
+  ]
+}
