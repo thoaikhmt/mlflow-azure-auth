@@ -164,6 +164,7 @@ spec:
     - name: http
       port: 8080
       targetPort: http
+{{- if eq .Values.ingress.type "traefik" }}
 ---
 apiVersion: v1
 kind: Service
@@ -213,4 +214,5 @@ spec:
   tls:
     secretName: {{ .Values.ingress.tlsSecretName }}
   {{- end }}
+{{- end }}
 {{- end }}

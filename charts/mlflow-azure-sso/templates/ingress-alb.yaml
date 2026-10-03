@@ -1,0 +1,31 @@
+{{- if and .Values.ingress.enabled (eq .Values.ingress.type "alb") }}
+# Default: AWS Load Balancer Controller (EKS) Ingress. One path sends every
+# request (prefixed UI/API and the plugin's root routes) to the Service; the ALB
+# targets the pod IPs directly (`target-type: ip`).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "mlflow-azure-sso.fullname" . }}
+  labels:
+    {{- include "mlflow-azure-sso.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.ingress.certificateArn }}
+    alb.ingress.kubernetes.io/certificate-arn: {{ .Values.ingress.certificateArn | quote }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.path }}
+            pathType: {{ .Values.ingress.pathType }}
+            backend:
+              service:
+                name: {{ include "mlflow-azure-sso.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}
