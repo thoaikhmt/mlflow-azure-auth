@@ -1,0 +1,107 @@
+{{- if .Values.ingress.enabled }}
+{{- $prefix := .Values.server.staticPrefix }}
+{{- $host := .Values.ingress.host }}
+{{- $hostRe := replace "." "\\." $host }}
+# Routing is handled by Traefik IngressRoutes (not a chart Ingress) because the
+# host firewall blocks Traefik's native pod-IP load balancing. An ExternalName
+# service forces Traefik to resolve the ClusterIP, which works.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mlflow-azure-sso.fullname" . }}-ext
+  labels:
+    {{- include "mlflow-azure-sso.labels" . | nindent 4 }}
+spec:
+  type: ExternalName
+  externalName: {{ include "mlflow-azure-sso.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "mlflow-azure-sso.fullname" . }}-redirect-https
+  labels:
+    {{- include "mlflow-azure-sso.labels" . | nindent 4 }}
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+{{- if and $prefix .Values.ingress.redirectBareHostToPrefix }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "mlflow-azure-sso.fullname" . }}-redirect-prefix
+  labels:
+    {{- include "mlflow-azure-sso.labels" . | nindent 4 }}
+spec:
+  redirectRegex:
+    regex: ^https?://{{ $hostRe }}(/.*)?$
+    replacement: https://{{ $host }}{{ $prefix }}${1}
+    permanent: true
+{{- end }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ include "mlflow-azure-sso.fullname" . }}-web
+  labels:
+    {{- include "mlflow-azure-sso.labels" . | nindent 4 }}
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`{{ $host }}`)
+      kind: Rule
+      middlewares:
+        - name: {{ include "mlflow-azure-sso.fullname" . }}-redirect-https
+          namespace: {{ .Release.Namespace }}
+      services:
+        - name: {{ include "mlflow-azure-sso.fullname" . }}-ext
+          port: {{ .Values.service.port }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ include "mlflow-azure-sso.fullname" . }}-websecure
+  labels:
+    {{- include "mlflow-azure-sso.labels" . | nindent 4 }}
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    {{- if $prefix }}
+    - match: Host(`{{ $host }}`) && PathPrefix(`{{ $prefix }}`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: {{ include "mlflow-azure-sso.fullname" . }}-ext
+          port: {{ .Values.service.port }}
+    {{- end }}
+    # The oidc-auth plugin serves its own routes at the server root (not under
+    # the static prefix), so proxy them too.
+    - match: >-
+        Host(`{{ $host }}`) && (PathPrefix(`/login`) || PathPrefix(`/logout`)
+        || PathPrefix(`/callback`) || PathPrefix(`/oidc`) || PathPrefix(`/providers`)
+        || PathPrefix(`/auth`) || PathPrefix(`/health`) || PathPrefix(`/saml`)
+        || PathPrefix(`/slo`) || PathPrefix(`/scim`))
+      kind: Rule
+      priority: 90
+      services:
+        - name: {{ include "mlflow-azure-sso.fullname" . }}-ext
+          port: {{ .Values.service.port }}
+    - match: Host(`{{ $host }}`)
+      kind: Rule
+      priority: 1
+      {{- if and $prefix .Values.ingress.redirectBareHostToPrefix }}
+      middlewares:
+        - name: {{ include "mlflow-azure-sso.fullname" . }}-redirect-prefix
+          namespace: {{ .Release.Namespace }}
+      {{- end }}
+      services:
+        - name: {{ include "mlflow-azure-sso.fullname" . }}-ext
+          port: {{ .Values.service.port }}
+  {{- if .Values.ingress.tlsSecretName }}
+  tls:
+    secretName: {{ .Values.ingress.tlsSecretName }}
+  {{- end }}
+{{- end }}

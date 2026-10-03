@@ -1,0 +1,146 @@
+# Defaults are for the homelab (single node, shared PostgreSQL, external S3).
+
+replicaCount: 1
+
+image:
+  repository: gitea.localhost/gitea_admin/mlflow
+  tag: v3.16.1-entra
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+# Keep the resource names stable (`mlflow`, `mlflow-pods`, `mlflow-ext`).
+fullnameOverride: "mlflow"
+
+serviceAccount:
+  create: true
+  name: ""
+
+# Flask/plugin session signing key. Keep it stable across restarts/replicas.
+flaskServerSecretKey: "4794bed2a966856e5ec982059c2f1db4"
+
+server:
+  host: "0.0.0.0"
+  containerPort: 5000
+  portName: mlflow
+  # Serve MLflow under a static prefix ('' disables).
+  staticPrefix: "/mlflow"
+  # MLflow DNS-rebinding guard. Must include the ingress host and the pod CIDR
+  # (kubelet probes hit the pod IP).
+  allowedHosts: "mlflow.localhost,mlflow.mlflow.svc.cluster.local:*,mlflow-pods.mlflow.svc.cluster.local:*,0.0.0.0:*,127.0.0.1:*,localhost:*,10.*"
+  workers: 1
+  logLevel: info
+  # Trust Traefik's X-Forwarded-* headers so MLflow builds https URLs.
+  forwardedAllowIps: "*"
+
+# Shared PostgreSQL (ArgoCD app `postgres`). The MLflow role's search_path is
+# the schema below, so MLflow and the oidc plugin share it.
+postgres:
+  host: postgres-postgresql.postgres.svc.cluster.local
+  port: 5432
+  database: apps
+  user: mlflow
+  password: "H6QmWBf4r98iVDesVikz"
+  schema: mlflow
+
+# Artifacts. Default is an external S3/AWS bucket; set endpoint for S3-compatible
+# stores (e.g. a separately-deployed MinIO). MinIO is NOT part of this chart.
+artifactRoot:
+  s3:
+    enabled: true
+    bucket: mlflow
+    path: ""
+    endpoint: ""
+    region: ""
+    accessKeyId: ""
+    secretAccessKey: ""
+    # Alternatively reference an existing Secret with keys below.
+    existingSecret:
+      name: ""
+      accessKeyIdKey: AWS_ACCESS_KEY_ID
+      secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
+
+# Azure Entra ID SSO. When false, MLflow runs with NO authentication
+# (no --app-name). When true, --app-name=oidc-auth plus the OIDC env.
+azureSso:
+  enabled: true
+  discoveryUrl: "https://azure-mock.localhost/11111111-2222-3333-4444-555555555555/.well-known/openid-configuration"
+  clientId: "mlflow-tracking"
+  clientSecret: "mlflow-secret"
+  redirectUri: "https://mlflow.localhost/callback"
+  scope: "openid,email,profile"
+  providerDisplayName: "Sign in with Azure Entra ID"
+  groupsAttribute: "groups"
+  # Entra sends group *object IDs*; a user is admitted if ANY of their groups
+  # matches ANY entry here.
+  groupName:
+    - 22222222-2222-2222-2222-222222222222
+  adminGroupName:
+    - 33333333-3333-3333-3333-333333333333
+  defaultPermission: "MANAGE"
+  sessionCookieSecure: true
+  sessionCookieSamesite: "lax"
+  # Entra claim mapping (the plugin persists only username + display_name).
+  usernameField: "oid"
+  displayNameField: "name"
+  # Distinct Alembic version table: the plugin shares MLflow's schema.
+  alembicVersionTable: "oidc_alembic_version"
+  verifySsl: false
+  automaticLoginRedirect: true
+  trustedProxies:
+    - 10.42.0.0/16
+  # Deploy the simulated Entra ID (navikt/mock-oauth2-server). Turn off to use a
+  # real tenant (set discoveryUrl/clientId/clientSecret above).
+  mock:
+    enabled: true
+    hostname: "azure-mock.localhost"
+    tenantId: "11111111-2222-3333-4444-555555555555"
+    image: "ghcr.io/navikt/mock-oauth2-server:6.0.4"
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Headless service so in-cluster clients can reach the pod directly.
+headless:
+  enabled: true
+  name: mlflow-pods
+
+# Traefik routing. The host firewall blocks Traefik's native pod-IP LB, so an
+# ExternalName service fronts the ClusterIP.
+ingress:
+  enabled: true
+  host: mlflow.localhost
+  tlsSecretName: mlflow-local-tls
+  # Redirect the bare host to the static prefix.
+  redirectBareHostToPrefix: true
+
+# Resolve the mock hostname cluster-wide to the node VIP (Traefik) via the k3s
+# coredns-custom import; needed because *.localhost is only in the host's hosts.
+coredns:
+  enabled: true
+  targetIp: "10.10.10.10"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 2Gi
+
+# Slow startup (MLflow + plugin OIDC registration); the chart has no startupProbe.
+livenessProbe:
+  initialDelaySeconds: 90
+  periodSeconds: 20
+  timeoutSeconds: 10
+  failureThreshold: 6
+readinessProbe:
+  initialDelaySeconds: 90
+  periodSeconds: 10
+  timeoutSeconds: 10
+  failureThreshold: 12
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

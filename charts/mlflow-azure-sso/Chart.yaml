@@ -1,0 +1,6 @@
+apiVersion: v2
+name: mlflow-azure-sso
+description: MLflow tracking server with Azure Entra ID SSO (mlflow-oidc-auth)
+type: application
+version: 0.1.0
+appVersion: "3.16.1"
