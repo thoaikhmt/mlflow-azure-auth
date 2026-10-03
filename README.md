@@ -188,3 +188,7 @@ works end-to-end without a real Azure tenant. Point
 Real Azure client secrets must not be committed. This is a throwaway homelab,
 so the mock client secret is checked in; replace it with a Secret reference
 (`oidcAuth.existingSecret`) before any real use.
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).
