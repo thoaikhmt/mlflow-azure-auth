@@ -11,11 +11,14 @@
           "match": "alice",
           "claims": {
             "sub": "alice-subject",
+            "oid": "44444444-4444-4444-4444-444444444444",
             "tid": "11111111-2222-3333-4444-555555555555",
-            "email": "alice@contoso.example",
+            "upn": "alice@contoso.example",
             "preferred_username": "alice@contoso.example",
+            "given_name": "Alice",
+            "family_name": "Example",
             "name": "Alice Example",
-            "groups": ["mlflow-users"]
+            "groups": ["22222222-2222-2222-2222-222222222222"]
           }
         },
         {
@@ -23,11 +26,32 @@
           "match": "admin",
           "claims": {
             "sub": "admin-subject",
+            "oid": "55555555-5555-5555-5555-555555555555",
             "tid": "11111111-2222-3333-4444-555555555555",
-            "email": "admin@contoso.example",
+            "upn": "admin@contoso.example",
             "preferred_username": "admin@contoso.example",
+            "given_name": "Admin",
+            "family_name": "Example",
             "name": "Admin Example",
-            "groups": ["mlflow-users", "mlflow-admins"]
+            "groups": [
+              "22222222-2222-2222-2222-222222222222",
+              "33333333-3333-3333-3333-333333333333"
+            ]
+          }
+        },
+        {
+          "requestParam": "subject",
+          "match": "bob",
+          "claims": {
+            "sub": "bob-subject",
+            "oid": "66666666-6666-6666-6666-666666666666",
+            "tid": "11111111-2222-3333-4444-555555555555",
+            "upn": "bob@contoso.example",
+            "preferred_username": "bob@contoso.example",
+            "given_name": "Bob",
+            "family_name": "Example",
+            "name": "Bob Example",
+            "groups": []
           }
         },
         {

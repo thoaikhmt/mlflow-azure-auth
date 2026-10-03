@@ -61,10 +61,13 @@ echo "==> starting MLflow ($IMAGE) with the oidc-auth plugin"
   -e OIDC_CLIENT_SECRET=mlflow-secret \
   -e OIDC_REDIRECT_URI="http://mlflow:5000/callback" \
   -e OIDC_SCOPE="openid,email,profile" \
-  -e OIDC_GROUP_NAME="mlflow-users" \
-  -e OIDC_ADMIN_GROUP_NAME="mlflow-admins" \
+  -e OIDC_USERNAME_FIELD="oid" \
+  -e OIDC_DISPLAY_NAME_FIELD="name" \
+  -e OIDC_GROUP_NAME="22222222-2222-2222-2222-222222222222" \
+  -e OIDC_ADMIN_GROUP_NAME="33333333-3333-3333-3333-333333333333" \
   -e OIDC_PROVIDER_DISPLAY_NAME="Sign in with Azure Entra ID" \
   -e OIDC_GROUPS_ATTRIBUTE=groups \
+  -e OIDC_ALEMBIC_VERSION_TABLE=oidc_alembic_version \
   -e DEFAULT_MLFLOW_PERMISSION=MANAGE \
   -e SESSION_COOKIE_SECURE=false \
   -e SESSION_COOKIE_SAMESITE=lax \
@@ -98,7 +101,8 @@ echo "==> running integration test"
   -v "$ROOT_DIR/test:/test:$MOUNT_OPTS" \
   -e MLFLOW_BASE="http://mlflow:5000" \
   -e OIDC_PROVIDER=default \
-  -e OIDC_GROUP_NAME="mlflow-users" \
-  -e OIDC_ADMIN_GROUP_NAME="mlflow-admins" \
+  -e OIDC_GROUP_NAME="22222222-2222-2222-2222-222222222222" \
+  -e OIDC_ADMIN_GROUP_NAME="33333333-3333-3333-3333-333333333333" \
+  -e EXPECTED_USERNAME="44444444-4444-4444-4444-444444444444" \
   -e OIDC_PROVIDER_DISPLAY_NAME="Sign in with Azure Entra ID" \
   "$IMAGE" python /test/azure_sso_test.py

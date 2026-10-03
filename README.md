@@ -39,14 +39,32 @@ The test uses [`navikt/mock-oauth2-server`](https://github.com/navikt/mock-oauth
 configured as an Entra-ID-shaped tenant:
 
 - issuer `http://mock-azure:8080/11111111-2222-3333-4444-555555555555`
-- the login **username** maps to Entra claims via `mock-azure/config.json`
-  (`groups`, `email`, `preferred_username`, `name`, `tid`):
+- the login **username** selects an Entra-shaped claim set from
+  `mock-azure/config.json` (`oid`, `upn`, `preferred_username`, `given_name`,
+  `family_name`, `name`, `groups`, `tid`). Like real Entra ID, `groups` carries
+  group **object IDs** (GUIDs), and the account key is the `oid` claim.
 
-| Username | Groups                        | Result              |
-| -------- | ----------------------------- | ------------------- |
-| `alice`  | `mlflow-users`                | logs in (non-admin) |
-| `admin`  | `mlflow-users`, `mlflow-admins` | logs in as admin   |
-| `bob`    | *(none)*                      | refused by group gate |
+| Username | `oid` (username)                       | `groups` (object IDs)                    | Result              |
+| -------- | -------------------------------------- | ---------------------------------------- | ------------------- |
+| `alice`  | `44444444-…`                           | `22222222-…`                              | logs in (non-admin) |
+| `admin`  | `55555555-…`                           | `22222222-…`, `33333333-…`                | logs in as admin    |
+| `bob`    | `66666666-…`                           | *(none)*                                  | refused by group gate |
+
+### Entra ID claim mapping
+
+The plugin persists only two user columns, `username` and `display_name` (there
+is no separate email/first/last column), so configure:
+
+| Entra claim              | Plugin setting                        | Notes |
+| ------------------------ | ------------------------------------- | ----- |
+| `oid`                    | `OIDC_USERNAME_FIELD=oid`             | Stable object id; survives UPN changes. |
+| `name`                   | `OIDC_DISPLAY_NAME_FIELD=name`        | Entra builds this from `given_name`/`family_name`; the plugin cannot store first/last separately. |
+| `groups` (object IDs)    | `OIDC_GROUP_NAME` / `OIDC_ADMIN_GROUP_NAME` | List the group **GUIDs** verbatim. |
+| `email` / `upn` / `preferred_username` | *(not used)*          | Only relevant if you key accounts by email (`OIDC_USERNAME_FIELD=email,preferred_username,upn`). |
+
+For human-readable group names instead of GUIDs, set
+`OIDC_GROUP_DETECTION_PLUGIN=mlflow_oidc_auth.plugins.group_detection_microsoft_entra_id`
+(the app then needs admin-consented Graph `GroupMember.Read.All`).
 
 Run it (needs `docker` or `podman`):
 
@@ -70,9 +88,13 @@ docker run --rm -p 5000:5000 \
   -e OIDC_CLIENT_SECRET="<client secret>" \
   -e OIDC_REDIRECT_URI="https://mlflow.example.com/callback" \
   -e OIDC_SCOPE="openid,email,profile" \
-  -e OIDC_GROUP_NAME="<allowed group object id or name>" \
-  -e OIDC_ADMIN_GROUP_NAME="<admin group object id or name>" \
-  -e OIDC_USERS_DB_URI="postgresql+psycopg2://user:pass@db:5432/mlflow_oidc" \
+  -e OIDC_USERNAME_FIELD="oid" \
+  -e OIDC_DISPLAY_NAME_FIELD="name" \
+  -e OIDC_GROUPS_ATTRIBUTE="groups" \
+  -e OIDC_GROUP_NAME="<allowed group object id>" \
+  -e OIDC_ADMIN_GROUP_NAME="<admin group object id>" \
+  -e OIDC_USERS_DB_URI="postgresql+psycopg2://mlflow:pass@db:5432/mlflow" \
+  -e OIDC_ALEMBIC_VERSION_TABLE="oidc_alembic_version" \
   -e SECRET_KEY="$(openssl rand -hex 32)" \
   gitea.localhost/gitea_admin/mlflow:v3.16.1-entra \
   mlflow server --app-name oidc-auth --host 0.0.0.0 --port 5000 \
@@ -99,6 +121,22 @@ docker run --rm -p 5000:5000 \
 - Behind a reverse proxy set `TRUSTED_PROXIES` or an explicit
   `OIDC_REDIRECT_URI`, otherwise the callback URL is built from the internal
   address. For self-signed homelab certs set `OIDC_VERIFY_SSL=false`.
+
+### Database schema
+
+The plugin shares MLflow's PostgreSQL database **and schema** (`mlflow`) rather
+than a separate `mlflow_oidc` schema:
+
+- point `OIDC_USERS_DB_URI` at the MLflow role/schema;
+- set `OIDC_ALEMBIC_VERSION_TABLE=oidc_alembic_version` so the two Alembic
+  histories do not collide on `alembic_version`.
+
+The schema must exist before either Alembic run; create it idempotently (the
+k3s deployment re-asserts this in an `ensure-mlflow-schema` init container):
+
+```sql
+CREATE SCHEMA IF NOT EXISTS mlflow AUTHORIZATION mlflow;
+```
 
 ## In k3s
 

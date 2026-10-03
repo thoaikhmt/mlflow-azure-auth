@@ -29,8 +29,12 @@ import requests
 
 MLFLOW = os.environ.get("MLFLOW_BASE", "http://mlflow:5000")
 PROVIDER = os.environ.get("OIDC_PROVIDER", "default")
-ALLOWED_GROUP = os.environ.get("OIDC_GROUP_NAME", "mlflow-users")
-ADMIN_GROUP = os.environ.get("OIDC_ADMIN_GROUP_NAME", "mlflow-admins")
+# Entra ID sends the group *object IDs* (GUIDs) in the `groups` claim.
+ALLOWED_GROUP = os.environ.get("OIDC_GROUP_NAME", "22222222-2222-2222-2222-222222222222")
+ADMIN_GROUP = os.environ.get("OIDC_ADMIN_GROUP_NAME", "33333333-3333-3333-3333-333333333333")
+# The plugin is configured with OIDC_USERNAME_FIELD=oid, so the account name is
+# the immutable Entra object id, not the email/UPN.
+ALICE_USERNAME = os.environ.get("EXPECTED_USERNAME", "44444444-4444-4444-4444-444444444444")
 DISPLAY_NAME = os.environ.get("OIDC_PROVIDER_DISPLAY_NAME", "Sign in with Azure Entra ID")
 
 _failures: list[str] = []
@@ -95,7 +99,7 @@ def test_local_user_login() -> None:
 
     status = auth_status(session)
     check("session is authenticated", status.get("authenticated") is True, json.dumps(status))
-    check("username comes from the Entra claim", status.get("username") == "alice@contoso.example", json.dumps(status))
+    check("username comes from the Entra `oid` claim", status.get("username") == ALICE_USERNAME, json.dumps(status))
     check("provider display name is reported", status.get("provider") == DISPLAY_NAME, json.dumps(status))
 
     current = session.get(f"{MLFLOW}/api/2.0/mlflow/users/current")
@@ -103,7 +107,8 @@ def test_local_user_login() -> None:
     if current.status_code == 200:
         user = current.json()
         groups = [g.get("group_name") for g in user.get("groups", [])]
-        check("user is in the allowed group", ALLOWED_GROUP in groups, json.dumps(user))
+        check("display name comes from the Entra `name` claim", user.get("display_name") == "Alice Example", json.dumps(user))
+        check("user is in the allowed group (by object id)", ALLOWED_GROUP in groups, json.dumps(user))
         check("normal user is not an admin", user.get("is_admin") is False, json.dumps(user))
 
     created = session.post(f"{MLFLOW}/api/2.0/mlflow/experiments/create", json={"name": "azure-sso-test"})
