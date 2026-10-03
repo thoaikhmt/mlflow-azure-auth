@@ -1,8 +1,8 @@
 # mlflow-azure-sso
 
-Custom MLflow tracking-server image that adds the `mlflow-oidc-auth` plugin so
-the server can authenticate against **Azure Entra ID** (OpenID Connect) instead
-of only MLflow's built-in basic auth.
+Custom [MLflow](https://mlflow.org/) tracking-server image that adds the
+`mlflow-oidc-auth` plugin so the server can authenticate against **Azure Entra
+ID** (OpenID Connect) instead of only MLflow's built-in basic auth.
 
 The official `ghcr.io/mlflow/mlflow` images ship basic auth only. This repo
 builds a drop-in replacement on top of the official `-full` image, and includes
@@ -21,7 +21,7 @@ test/azure_sso_test.py     the assertions (login, groups, admin, denials, UI)
 ## Image
 
 ```
-gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.6
+gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.7
 ```
 
 Built and pushed by the Gitea Actions workflow on every push to `main`. It is
@@ -130,7 +130,7 @@ docker run --rm -p 5000:5000 \
   -e OIDC_USERS_DB_URI="postgresql+psycopg2://mlflow:pass@db:5432/mlflow" \
   -e OIDC_ALEMBIC_VERSION_TABLE="oidc_alembic_version" \
   -e SECRET_KEY="$(openssl rand -hex 32)" \
-  gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.6 \
+  gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.7 \
   mlflow server --app-name oidc-auth --host 0.0.0.0 --port 5000 \
     --backend-store-uri postgresql:// --default-artifact-root s3://mlflow/
 ```

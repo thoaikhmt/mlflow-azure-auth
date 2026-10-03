@@ -59,10 +59,10 @@
             xhr.send();
         }
 
-        /** Wait for the Settings menu anchor, then invoke cb(anchor). */
+        /** Wait for a menu anchor (settings preferred, docs fallback), then invoke cb(anchor). */
         function waitForMenuAnchor(cb) {
             function findAnchor() {
-                return document.querySelector('a[href^="#/settings"]');
+                return document.querySelector('a[href^="#/settings"]') || document.querySelector('a[href*="mlflow.org/docs/latest/genai/"]');
             }
 
             var el = findAnchor();
@@ -119,7 +119,7 @@
             }
 
             function getPreferredAnchorLink() {
-                return container.querySelector('a[href^="#/settings"]');
+                return container.querySelector('a[href^="#/settings"]') || container.querySelector('a[href*="mlflow.org/docs/latest/genai/"]');
             }
 
             function reorderInjectedItems() {
@@ -174,7 +174,8 @@
         document.addEventListener("DOMContentLoaded", function () {
             getJSON("api/2.0/mlflow/users/current", function (err, res) {
                 if (err) { console.error("Error fetching username:", err); return; }
-                // Insert the menu after the Settings entry.
+                // Prefer Settings as insertion anchor when present; otherwise
+                // use Docs so menu works before a workspace is selected.
                 waitForMenuAnchor(function (anchorLink) {
                     injectMenu(res.display_name, anchorLink);
                 });

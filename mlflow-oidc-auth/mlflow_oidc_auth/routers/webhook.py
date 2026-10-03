@@ -4,6 +4,8 @@ FastAPI webhook router implementation.
 This module provides CRUD operations for MLflow webhooks with admin-only access control.
 All webhook operations require admin permissions for security purposes.
 
+Based on MLflow webhook documentation: https://mlflow.org/docs/latest/ml/webhooks/
+
 Supported webhook events (MLflow 3.8.x):
 - registered_model.created
 - model_version.created
