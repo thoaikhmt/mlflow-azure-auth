@@ -5,7 +5,8 @@
 #   * push a `v*` git tag -> docker.io/thoaikhmt/mlflow-azure-auth:<tag>
 #                             (first release: v1.0.0)
 #
-# Every build also gets an immutable `sha-<short>` tag.
+# Only those tags are pushed: `latest` is moved on every main build, and a tag
+# build publishes the tag name once. No `sha-<short>` tags.
 #
 # The image is built with Docker's daemon builder (`DOCKER_BUILDKIT=0 docker
 # build` + `docker push`), which emits a plain Docker schema2 manifest: no OCI
@@ -55,13 +56,10 @@ jobs:
             refs/heads/main) tag="latest" ;;
             *) echo "unsupported ref: ${ref}" >&2; exit 1 ;;
           esac
-          short="$(echo "${{ github.sha }}" | cut -c1-7)"
-          echo "==> pushing ${IMAGE}:${tag} and ${IMAGE}:sha-${short}"
+          echo "==> building and pushing ${IMAGE}:${tag}"
           DOCKER_BUILDKIT=0 docker build \
             --file Containerfile \
             --tag "${IMAGE}:${tag}" \
-            --tag "${IMAGE}:sha-${short}" \
             .
           docker push "${IMAGE}:${tag}"
-          docker push "${IMAGE}:sha-${short}"
 
