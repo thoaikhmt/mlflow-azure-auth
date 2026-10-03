@@ -11,7 +11,9 @@ that MLflow:
   * provisions the user and applies the group gate,
   * grants admin from the Entra admin group,
   * refuses a user who is in no allowed group,
-  * rejects unauthenticated API traffic.
+  * rejects unauthenticated API traffic,
+  * serves the plugin's React admin UI and injects a menu whose hrefs work under
+    a `--static-prefix`.
 
 The mock maps the login *username* to Entra claims (`groups`, `email`, ...) via
 ``mock-azure/config.json``; the tenant/issuer is shaped like a real Entra ID
@@ -170,6 +172,42 @@ def test_user_outside_allowed_group_is_refused() -> None:
     )
 
 
+def test_admin_ui_and_menu_are_served() -> None:
+    """The plugin's React admin UI must ship, and the injected menu must link to it.
+
+    Two regressions this guards:
+      * installing the plugin from a source archive omitted the git-ignored
+        React build (``mlflow_oidc_auth/ui``), so every ``/oidc/ui/*`` request
+        raised ``RuntimeError: UI directory not found`` (HTTP 500);
+      * ``hack/menu.html`` used relative ``oidc/ui/user`` / ``logout`` hrefs that
+        resolved under ``--static-prefix`` to ``/mlflow/oidc/ui/user`` (404).
+    """
+    session, _ = start_login("alice")
+
+    ui = session.get(f"{MLFLOW}/oidc/ui/user")
+    check("admin UI index is served", ui.status_code == 200, f"got {ui.status_code}: {ui.text[:120]}")
+    check(
+        "admin UI serves the React app",
+        ui.status_code == 200 and 'id="root"' in ui.text and "./assets/" in ui.text,
+        ui.text[:200],
+    )
+
+    config = session.get(f"{MLFLOW}/oidc/ui/config.json")
+    check(
+        "admin UI config reports the session",
+        config.status_code == 200 and config.json().get("authenticated") is True,
+        f"got {config.status_code}: {config.text[:120]}",
+    )
+
+    index = session.get(f"{API_BASE}/")
+    check("MLflow index is served with the injected menu", index.status_code == 200 and "Permissions" in index.text, f"got {index.status_code}")
+    check(
+        "injected menu links to the plugin at the server root",
+        'href: "/oidc/ui/user"' in index.text and 'href: "/logout"' in index.text,
+        "menu hrefs must be root-absolute; relative ones resolve under the static prefix and 404",
+    )
+
+
 def test_unauthenticated_api_is_rejected() -> None:
     resp = requests.get(f"{API_BASE}/api/2.0/mlflow/users/current")
     check("unauthenticated API call is rejected", resp.status_code == 401, f"got {resp.status_code}")
@@ -199,6 +237,7 @@ def main() -> int:
         test_provider_is_advertised,
         test_unauthenticated_api_is_rejected,
         test_unauthenticated_ui_redirects_to_login,
+        test_admin_ui_and_menu_are_served,
         test_local_user_login,
         test_admin_group_grants_admin,
         test_any_matching_group_admits,

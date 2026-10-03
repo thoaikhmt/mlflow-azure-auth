@@ -1,0 +1,134 @@
+import type { NavLinkData } from "./navigation-data";
+import {
+  faUser,
+  faScrewdriver,
+  faSquareShareNodes,
+  faMicroscope,
+  faUserGroup,
+  faHexagonNodes,
+  faTrash,
+  faWrench,
+  faLink,
+  faKey,
+  faHexagonNodesBolt,
+  faBuilding,
+  faPlug,
+  faSitemap,
+  faServer,
+} from "@fortawesome/free-solid-svg-icons";
+
+export const getSidebarData = (
+  isAdmin: boolean,
+  genAiGatewayEnabled: boolean,
+  workspacesEnabled: boolean,
+): NavLinkData[] => {
+  const baseLinks: NavLinkData[] = [
+    { label: "Users", href: "/users", isInternalLink: true, icon: faUser },
+    {
+      label: "Service Accounts",
+      href: "/service-accounts",
+      isInternalLink: true,
+      icon: faScrewdriver,
+    },
+    {
+      label: "Groups",
+      href: "/groups",
+      isInternalLink: true,
+      icon: faUserGroup,
+    },
+    {
+      label: "Experiments",
+      href: "/experiments",
+      isInternalLink: true,
+      icon: faMicroscope,
+    },
+    {
+      label: "Prompts",
+      href: "/prompts",
+      isInternalLink: true,
+      icon: faSquareShareNodes,
+    },
+    {
+      label: "Models",
+      href: "/models",
+      isInternalLink: true,
+      icon: faHexagonNodes,
+    },
+    // MLflow's MCP server registry: not part of the AI gateway, so not behind its flag.
+    {
+      label: "MCP Servers",
+      href: "/mcp-servers",
+      isInternalLink: true,
+      icon: faServer,
+    },
+  ];
+
+  let sidebarContent: NavLinkData[] = [...baseLinks];
+
+  if (genAiGatewayEnabled) {
+    const aiLinks: NavLinkData[] = [
+      {
+        label: "AI Endpoints",
+        href: "/ai-gateway/ai-endpoints",
+        isInternalLink: true,
+        icon: faLink,
+      },
+      {
+        label: "AI Secrets",
+        href: "/ai-gateway/secrets",
+        isInternalLink: true,
+        icon: faKey,
+      },
+      {
+        label: "AI Models",
+        href: "/ai-gateway/models",
+        isInternalLink: true,
+        icon: faHexagonNodesBolt,
+      },
+    ];
+    sidebarContent = [...sidebarContent, ...aiLinks];
+  }
+
+  if (workspacesEnabled) {
+    sidebarContent = [
+      ...sidebarContent,
+      {
+        label: "Workspaces",
+        href: "/workspaces",
+        isInternalLink: true,
+        icon: faBuilding,
+      },
+    ];
+  }
+
+  if (isAdmin) {
+    const adminLinks: NavLinkData[] = [
+      { label: "Trash", href: "/trash", isInternalLink: true, icon: faTrash },
+      {
+        label: "Webhooks",
+        href: "/webhooks",
+        isInternalLink: true,
+        icon: faWrench,
+      },
+      {
+        label: "SCIM",
+        href: "/scim",
+        isInternalLink: true,
+        icon: faPlug,
+      },
+    ];
+
+    if (workspacesEnabled) {
+      adminLinks.push({
+        label: "Workspace rules",
+        href: "/workspace-rules",
+        isInternalLink: true,
+        icon: faSitemap,
+      });
+    }
+
+    sidebarContent = [...sidebarContent, ...adminLinks];
+  }
+
+  return sidebarContent;
+};

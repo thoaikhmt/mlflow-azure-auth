@@ -1,0 +1,575 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { NormalPermissionsView } from "./normal-permissions-view";
+import * as httpModule from "../../../core/services/http";
+import * as useToastModule from "../../../shared/components/toast/use-toast";
+import * as useSearchModule from "../../../core/hooks/use-search";
+import * as useExpHooks from "../../../core/hooks/use-user-experiment-permissions";
+import * as useModelHooks from "../../../core/hooks/use-user-model-permissions";
+import * as usePromptHooks from "../../../core/hooks/use-user-prompt-permissions";
+import * as useGroupExpHooks from "../../../core/hooks/use-group-experiment-permissions";
+import * as useGroupModelHooks from "../../../core/hooks/use-group-model-permissions";
+import * as useGroupPromptHooks from "../../../core/hooks/use-group-prompt-permissions";
+import * as useAllExpHooks from "../../../core/hooks/use-all-experiments";
+import * as useAllModelHooks from "../../../core/hooks/use-all-models";
+import * as useAllPromptHooks from "../../../core/hooks/use-all-prompts";
+import * as useUserGatewayEndpointPermissions from "../../../core/hooks/use-user-gateway-endpoint-permissions";
+import * as useGroupGatewayEndpointPermissions from "../../../core/hooks/use-group-gateway-endpoint-permissions";
+import * as useUserGatewaySecretPermissions from "../../../core/hooks/use-user-gateway-secret-permissions";
+import * as useGroupGatewaySecretPermissions from "../../../core/hooks/use-group-gateway-secret-permissions";
+import * as useUserGatewayModelPermissions from "../../../core/hooks/use-user-gateway-model-permissions";
+import * as useGroupGatewayModelPermissions from "../../../core/hooks/use-group-gateway-model-permissions";
+import * as useAllGatewayEndpoints from "../../../core/hooks/use-all-gateway-endpoints";
+import * as useAllGatewaySecrets from "../../../core/hooks/use-all-gateway-secrets";
+import * as useAllGatewayModels from "../../../core/hooks/use-all-gateway-models";
+import * as useUserMcpServerPermissions from "../../../core/hooks/use-user-mcp-server-permissions";
+import * as useGroupMcpServerPermissions from "../../../core/hooks/use-group-mcp-server-permissions";
+import * as useAllMcpServers from "../../../core/hooks/use-all-mcp-servers";
+import type {
+  PermissionType,
+  ExperimentPermission,
+  ModelPermission,
+  ExperimentListItem,
+} from "../../../shared/types/entity";
+import type { ToastContextType } from "../../../shared/components/toast/toast-context-val";
+import { getRuntimeConfig } from "../../../shared/services/runtime-config";
+import { CHOOSE_WORKSPACE_TITLE } from "../hooks/use-grant-workspace-scope";
+import { workspaceScopeWrapper } from "../../../tests/workspace-scope-wrapper";
+
+vi.mock("../../../core/services/http");
+vi.mock("../../../shared/services/runtime-config", () => ({
+  getRuntimeConfig: vi.fn(() =>
+    Promise.resolve({
+      basePath: "",
+      uiPath: "",
+      provider: "",
+      authenticated: true,
+    }),
+  ),
+}));
+vi.mock("../../../shared/components/toast/use-toast");
+vi.mock("../../../core/hooks/use-search");
+vi.mock("../../../core/hooks/use-user-experiment-permissions");
+vi.mock("../../../core/hooks/use-user-model-permissions");
+vi.mock("../../../core/hooks/use-user-prompt-permissions");
+vi.mock("../../../core/hooks/use-group-experiment-permissions");
+vi.mock("../../../core/hooks/use-group-model-permissions");
+vi.mock("../../../core/hooks/use-group-prompt-permissions");
+vi.mock("../../../core/hooks/use-all-experiments");
+vi.mock("../../../core/hooks/use-all-models");
+vi.mock("../../../core/hooks/use-all-prompts");
+vi.mock("../../../core/hooks/use-user-gateway-endpoint-permissions");
+vi.mock("../../../core/hooks/use-group-gateway-endpoint-permissions");
+vi.mock("../../../core/hooks/use-user-gateway-secret-permissions");
+vi.mock("../../../core/hooks/use-group-gateway-secret-permissions");
+vi.mock("../../../core/hooks/use-user-gateway-model-permissions");
+vi.mock("../../../core/hooks/use-group-gateway-model-permissions");
+vi.mock("../../../core/hooks/use-all-gateway-endpoints");
+vi.mock("../../../core/hooks/use-all-gateway-secrets");
+vi.mock("../../../core/hooks/use-all-gateway-models");
+vi.mock("../../../core/hooks/use-user-mcp-server-permissions");
+vi.mock("../../../core/hooks/use-group-mcp-server-permissions");
+vi.mock("../../../core/hooks/use-all-mcp-servers");
+
+describe("NormalPermissionsView", () => {
+  const mockShowToast = vi.fn();
+  const mockRefresh = vi.fn();
+
+  const defaultSearch = {
+    searchTerm: "",
+    submittedTerm: "",
+    handleInputChange: vi.fn(),
+    handleSearchSubmit: vi.fn(),
+    handleClearSearch: vi.fn(),
+  };
+
+  const mockExpPermissions: ExperimentPermission[] = [
+    { name: "item1", permission: "READ", kind: "user", id: "id1" },
+    { name: "item2", permission: "MANAGE", kind: "service-account", id: "id2" },
+    { name: "fallback", permission: "READ", kind: "fallback", id: "f1" },
+  ];
+
+  const mockModelPermissions: ModelPermission[] = [
+    { name: "item1", permission: "READ", kind: "user" },
+    { name: "item2", permission: "MANAGE", kind: "service-account" },
+    { name: "fallback", permission: "READ", kind: "fallback" },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(useToastModule, "useToast").mockReturnValue({
+      showToast: mockShowToast,
+      removeToast: vi.fn(),
+    } as ToastContextType);
+    vi.spyOn(useSearchModule, "useSearch").mockReturnValue(defaultSearch);
+
+    // Default mock implementation for all hooks
+    vi.spyOn(useExpHooks, "useUserExperimentPermissions").mockReturnValue({
+      isLoading: false,
+      error: null,
+      refresh: mockRefresh,
+      permissions: mockExpPermissions,
+    });
+    vi.spyOn(
+      useModelHooks,
+      "useUserRegisteredModelPermissions",
+    ).mockReturnValue({
+      isLoading: false,
+      error: null,
+      refresh: mockRefresh,
+      permissions: mockModelPermissions,
+    });
+    vi.spyOn(usePromptHooks, "useUserPromptPermissions").mockReturnValue({
+      isLoading: false,
+      error: null,
+      refresh: mockRefresh,
+      permissions: mockModelPermissions,
+    });
+    vi.spyOn(useGroupExpHooks, "useGroupExperimentPermissions").mockReturnValue(
+      {
+        isLoading: false,
+        error: null,
+        refresh: mockRefresh,
+        permissions: mockExpPermissions,
+      },
+    );
+    vi.spyOn(
+      useGroupModelHooks,
+      "useGroupRegisteredModelPermissions",
+    ).mockReturnValue({
+      isLoading: false,
+      error: null,
+      refresh: mockRefresh,
+      permissions: mockModelPermissions,
+    });
+    vi.spyOn(useGroupPromptHooks, "useGroupPromptPermissions").mockReturnValue({
+      isLoading: false,
+      error: null,
+      refresh: mockRefresh,
+      permissions: mockModelPermissions,
+    });
+
+    vi.spyOn(useAllExpHooks, "useAllExperiments").mockReturnValue({
+      allExperiments: [{ id: "new1", name: "New Exp" } as ExperimentListItem],
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+    vi.spyOn(useAllModelHooks, "useAllModels").mockReturnValue({
+      allModels: [
+        { name: "New Model", aliases: "", description: "", tags: {} },
+      ],
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+    vi.spyOn(useAllPromptHooks, "useAllPrompts").mockReturnValue({
+      allPrompts: [
+        { name: "New Prompt", aliases: "", description: "", tags: {} },
+      ],
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+
+    vi.spyOn(
+      useUserGatewayEndpointPermissions,
+      "useUserGatewayEndpointPermissions",
+    ).mockReturnValue({
+      permissions: mockExpPermissions,
+      isLoading: false,
+      error: null,
+      refresh: mockRefresh,
+    });
+
+    vi.spyOn(
+      useGroupGatewayEndpointPermissions,
+      "useGroupGatewayEndpointPermissions",
+    ).mockReturnValue({
+      permissions: mockExpPermissions,
+      isLoading: false,
+      error: null,
+      refresh: mockRefresh,
+    });
+
+    vi.spyOn(
+      useUserGatewaySecretPermissions,
+      "useUserGatewaySecretPermissions",
+    ).mockReturnValue({
+      permissions: mockExpPermissions,
+      isLoading: false,
+      error: null,
+      refresh: mockRefresh,
+    });
+
+    vi.spyOn(
+      useGroupGatewaySecretPermissions,
+      "useGroupGatewaySecretPermissions",
+    ).mockReturnValue({
+      permissions: mockExpPermissions,
+      isLoading: false,
+      error: null,
+      refresh: mockRefresh,
+    });
+
+    vi.spyOn(
+      useUserGatewayModelPermissions,
+      "useUserGatewayModelPermissions",
+    ).mockReturnValue({
+      permissions: mockExpPermissions,
+      isLoading: false,
+      error: null,
+      refresh: mockRefresh,
+    });
+
+    vi.spyOn(
+      useGroupGatewayModelPermissions,
+      "useGroupGatewayModelPermissions",
+    ).mockReturnValue({
+      permissions: mockExpPermissions,
+      isLoading: false,
+      error: null,
+      refresh: mockRefresh,
+    });
+
+    vi.spyOn(useAllGatewayEndpoints, "useAllGatewayEndpoints").mockReturnValue({
+      allGatewayEndpoints: [
+        {
+          name: "New Endpoint",
+          type: "llm/v1/chat",
+          description: "",
+          route_type: "llm/v1/chat",
+          auth_type: "bearer",
+        },
+      ],
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+
+    vi.spyOn(useAllGatewaySecrets, "useAllGatewaySecrets").mockReturnValue({
+      allGatewaySecrets: [{ key: "New Secret" }],
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+
+    vi.spyOn(useAllGatewayModels, "useAllGatewayModels").mockReturnValue({
+      allGatewayModels: [{ name: "New AI Model", source: "openai" }],
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+
+    vi.spyOn(
+      useUserMcpServerPermissions,
+      "useUserMcpServerPermissions",
+    ).mockReturnValue({
+      permissions: mockExpPermissions,
+      isLoading: false,
+      error: null,
+      refresh: mockRefresh,
+    });
+    vi.spyOn(
+      useGroupMcpServerPermissions,
+      "useGroupMcpServerPermissions",
+    ).mockReturnValue({
+      permissions: mockExpPermissions,
+      isLoading: false,
+      error: null,
+      refresh: mockRefresh,
+    });
+    vi.spyOn(useAllMcpServers, "useAllMcpServers").mockReturnValue({
+      allMcpServers: [{ name: "com.example/new" }],
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+  });
+
+  const types: PermissionType[] = [
+    "experiments",
+    "models",
+    "prompts",
+    "ai-endpoints",
+    "ai-secrets",
+    "ai-models",
+    "mcp-servers",
+  ];
+
+  types.forEach((type) => {
+    describe(`Type: ${type}`, () => {
+      const getExpectedValue = (t: string) => {
+        if (t === "experiments") return "new1";
+        if (t === "models") return "New Model";
+        if (t === "prompts") return "New Prompt";
+        if (t === "ai-endpoints") return "New Endpoint";
+        if (t === "ai-secrets") return "New Secret";
+        if (t === "ai-models") return "New AI Model";
+        if (t === "mcp-servers") return "com.example/new";
+        throw new Error(`Unknown type in getExpectedValue: ${t}`);
+      };
+
+      it(`renders table with data for ${type}`, () => {
+        render(
+          <NormalPermissionsView
+            type={type}
+            entityKind="user"
+            entityName="user1"
+          />,
+        );
+        expect(screen.getByText("item1")).toBeDefined();
+      });
+
+      it(`opens grant modal and saves for ${type} (group)`, async () => {
+        vi.spyOn(httpModule, "http").mockResolvedValue({} as Response);
+        render(
+          <NormalPermissionsView
+            type={type}
+            entityKind="group"
+            entityName="group1"
+          />,
+        );
+
+        const addText =
+          type === "experiments"
+            ? /Add experiment/i
+            : type === "models"
+              ? /Add model/i
+              : type === "prompts"
+                ? /Add prompt/i
+                : type === "ai-secrets"
+                  ? /Add secret/i
+                  : type === "ai-models"
+                    ? /Add AI model/i
+                    : type === "mcp-servers"
+                      ? /Add MCP server/i
+                      : /Add AI endpoint/i;
+        fireEvent.click(screen.getByText(addText));
+
+        const labelText =
+          type === "experiments"
+            ? /Experiment/i
+            : type === "models"
+              ? /Model/i
+              : type === "prompts"
+                ? /Prompt/i
+                : type === "ai-secrets"
+                  ? /Secret/i
+                  : type === "ai-models"
+                    ? /AI Model/i
+                    : type === "mcp-servers"
+                      ? /MCP Server/i
+                      : /AI Endpoint/i;
+        const select = screen.getByLabelText(labelText);
+        fireEvent.change(select, { target: { value: getExpectedValue(type) } });
+
+        const saveButton = screen.getByRole("button", { name: /^Save$/i });
+        fireEvent.click(saveButton);
+
+        await waitFor(() => {
+          expect(httpModule.http).toHaveBeenCalledWith(
+            expect.stringContaining(
+              `/api/2.0/mlflow/permissions/groups/group1/${type === "models" ? "registered-models" : type === "ai-endpoints" ? "gateways/endpoints" : type === "ai-secrets" ? "gateways/secrets" : type === "ai-models" ? "gateways/model-definitions" : type}`,
+            ),
+            expect.objectContaining({ method: "POST" }),
+          );
+        });
+      });
+
+      it(`handles removing for ${type} (user)`, async () => {
+        vi.spyOn(httpModule, "http").mockResolvedValue({} as Response);
+        render(
+          <NormalPermissionsView
+            type={type}
+            entityKind="user"
+            entityName="user1"
+          />,
+        );
+
+        const removeButtons = screen.getAllByTitle(/Remove permission/i);
+        fireEvent.click(removeButtons[0]);
+
+        await waitFor(() => {
+          expect(httpModule.http).toHaveBeenCalledWith(
+            expect.stringContaining(
+              `/api/2.0/mlflow/permissions/users/user1/${type === "models" ? "registered-models" : type === "ai-endpoints" ? "gateways/endpoints" : type === "ai-secrets" ? "gateways/secrets" : type === "ai-models" ? "gateways/model-definitions" : type}`,
+            ),
+            expect.objectContaining({ method: "DELETE" }),
+          );
+        });
+      });
+    });
+  });
+
+  it("verifies icon and action logic for different kinds", () => {
+    // user kind on user entity
+    render(
+      <NormalPermissionsView
+        type="experiments"
+        entityKind="user"
+        entityName="user1"
+      />,
+    );
+    const editButtons = screen.getAllByTitle(/Edit permission/i);
+    const addPermissionButtons = screen.getAllByTitle(/Add permission/i);
+    const removeButtons = screen.getAllByTitle(/Remove permission/i);
+
+    expect(editButtons[0]).toBeDefined(); // item1 (kind: user)
+    expect(addPermissionButtons[0]).toBeDefined(); // fallback (kind: fallback)
+    expect(removeButtons[0]).toBeEnabled(); // item1 (kind: user)
+    expect(removeButtons[2]).toBeDisabled(); // fallback (kind: fallback)
+  });
+
+  it("handles failure during operations", async () => {
+    vi.spyOn(httpModule, "http").mockRejectedValue(new Error("Fail"));
+    render(
+      <NormalPermissionsView
+        type="experiments"
+        entityKind="user"
+        entityName="user1"
+      />,
+    );
+
+    const removeButtons = screen.getAllByTitle(/Remove permission/i);
+    fireEvent.click(removeButtons[0]);
+
+    await waitFor(() => {
+      expect(mockShowToast).toHaveBeenCalledWith(
+        expect.stringContaining("Failed"),
+        "error",
+      );
+    });
+  });
+
+  it("prefixes URL with basePath from runtime config", async () => {
+    vi.mocked(getRuntimeConfig).mockResolvedValue({
+      basePath: "/mlflow",
+      uiPath: "",
+      provider: "",
+      gen_ai_gateway_enabled: false,
+      authenticated: true,
+      workspaces_enabled: false,
+    });
+    vi.spyOn(httpModule, "http").mockResolvedValue({} as Response);
+    render(
+      <NormalPermissionsView
+        type="experiments"
+        entityKind="user"
+        entityName="user1"
+      />,
+    );
+
+    const removeButtons = screen.getAllByTitle(/Remove permission/i);
+    fireEvent.click(removeButtons[0]);
+
+    await waitFor(() => {
+      expect(httpModule.http).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/mlflow\//),
+        expect.objectContaining({ method: "DELETE" }),
+      );
+    });
+  });
+
+  it("renders loading and error appropriately", () => {
+    vi.spyOn(useExpHooks, "useUserExperimentPermissions").mockReturnValue({
+      isLoading: true,
+      error: null,
+      refresh: mockRefresh,
+      permissions: mockExpPermissions,
+    });
+    const { rerender } = render(
+      <NormalPermissionsView
+        type="experiments"
+        entityKind="user"
+        entityName="user1"
+      />,
+    );
+    expect(screen.getByText(/Loading/i)).toBeDefined();
+
+    vi.spyOn(useExpHooks, "useUserExperimentPermissions").mockReturnValue({
+      isLoading: false,
+      error: new Error("Error"),
+      refresh: mockRefresh,
+      permissions: mockExpPermissions,
+    });
+    rerender(
+      <NormalPermissionsView
+        type="experiments"
+        entityKind="user"
+        entityName="user1"
+      />,
+    );
+    expect(screen.getByText(/Error/i)).toBeDefined();
+  });
+
+  it("clears search when type prop changes", () => {
+    const { rerender } = render(
+      <NormalPermissionsView
+        type="experiments"
+        entityKind="user"
+        entityName="user1"
+      />,
+    );
+
+    rerender(
+      <NormalPermissionsView
+        type="models"
+        entityKind="user"
+        entityName="user1"
+      />,
+    );
+
+    expect(defaultSearch.handleClearSearch).toHaveBeenCalled();
+  });
+
+  describe("workspace scope", () => {
+    it("names the workspace on a user's model grants and allows changes", () => {
+      render(
+        <NormalPermissionsView
+          type="models"
+          entityKind="user"
+          entityName="user1"
+        />,
+        { wrapper: workspaceScopeWrapper(true, "team-a") },
+      );
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Grants shown here belong to workspace team-a",
+      );
+      expect(screen.getAllByTitle(/Remove permission/i)[0]).toBeEnabled();
+    });
+
+    it("with All Workspaces, blocks editing, removing and adding a group's grants", () => {
+      render(
+        <NormalPermissionsView
+          type="prompts"
+          entityKind="group"
+          entityName="group1"
+        />,
+        { wrapper: workspaceScopeWrapper(true, null) },
+      );
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "These are the default workspace's grants",
+      );
+      expect(screen.getByText(/Add prompt/i).closest("button")).toBeDisabled();
+      const blocked = screen.getAllByTitle(CHOOSE_WORKSPACE_TITLE);
+      expect(blocked.length).toBeGreaterThan(1);
+      for (const control of blocked) {
+        expect(control).toBeDisabled();
+      }
+    });
+
+    it("leaves experiment grants unchanged under All Workspaces", () => {
+      render(
+        <NormalPermissionsView
+          type="experiments"
+          entityKind="user"
+          entityName="user1"
+        />,
+        { wrapper: workspaceScopeWrapper(true, null) },
+      );
+      expect(screen.queryByRole("status")).toBeNull();
+      expect(screen.queryAllByTitle(CHOOSE_WORKSPACE_TITLE)).toHaveLength(0);
+    });
+  });
+});

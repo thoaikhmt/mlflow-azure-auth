@@ -1,0 +1,250 @@
+from __future__ import annotations
+
+# Import directly from sibling modules to avoid circular imports
+from mlflow_oidc_auth.entities.experiment import ExperimentPermission
+from mlflow_oidc_auth.entities.gateway_endpoint import GatewayEndpointPermission
+from mlflow_oidc_auth.entities.gateway_model_definition import GatewayModelDefinitionPermission
+from mlflow_oidc_auth.entities.gateway_secret import GatewaySecretPermission
+from mlflow_oidc_auth.entities.group import Group
+from mlflow_oidc_auth.entities.registered_model import RegisteredModelPermission
+from mlflow_oidc_auth.entities.scorer import ScorerPermission
+
+
+class User:
+    def __init__(
+        self,
+        id_: int | None = None,
+        username: str | None = None,
+        is_admin: bool = False,
+        is_service_account: bool = False,
+        display_name: str | None = None,
+        experiment_permissions=None,
+        registered_model_permissions=None,
+        scorer_permissions=None,
+        gateway_endpoint_permissions=None,
+        gateway_model_definition_permissions=None,
+        gateway_secret_permissions=None,
+        groups=None,
+        active: bool = True,
+        managed_by: str = "manual",
+        service_account_source: str | None = None,
+    ):
+        # Provide sensible defaults so tests can construct User with partial data.
+        # ``active`` defaults True and ``managed_by`` to "manual" to match the #333 backfill:
+        # a User built without them describes a normal, locally managed, enabled account, so no
+        # existing construction site silently produces a disabled one.
+        self._id = id_
+        self._username = username
+        self._is_admin = is_admin
+        self._is_service_account = is_service_account
+        self._experiment_permissions = experiment_permissions or []
+        self._registered_model_permissions = registered_model_permissions or []
+        self._scorer_permissions = scorer_permissions or []
+        self._gateway_endpoint_permissions = gateway_endpoint_permissions or []
+        self._gateway_model_definition_permissions = gateway_model_definition_permissions or []
+        self._gateway_secret_permissions = gateway_secret_permissions or []
+        self._display_name = display_name
+        self._groups = groups or []
+        self._active = active
+        self._managed_by = managed_by
+        self._service_account_source = service_account_source
+
+    @property
+    def id(self):
+        return self._id
+
+    @property
+    def username(self):
+        return self._username
+
+    @property
+    def is_admin(self):
+        return self._is_admin
+
+    @is_admin.setter
+    def is_admin(self, is_admin):
+        self._is_admin = is_admin
+
+    @property
+    def is_service_account(self):
+        return self._is_service_account
+
+    @is_service_account.setter
+    def is_service_account(self, is_service_account):
+        self._is_service_account = is_service_account
+
+    @property
+    def experiment_permissions(self):
+        return self._experiment_permissions
+
+    @experiment_permissions.setter
+    def experiment_permissions(self, experiment_permissions):
+        self._experiment_permissions = experiment_permissions
+
+    @property
+    def registered_model_permissions(self):
+        return self._registered_model_permissions
+
+    @registered_model_permissions.setter
+    def registered_model_permissions(self, registered_model_permissions):
+        self._registered_model_permissions = registered_model_permissions
+
+    @property
+    def scorer_permissions(self):
+        return self._scorer_permissions
+
+    @scorer_permissions.setter
+    def scorer_permissions(self, scorer_permissions):
+        self._scorer_permissions = scorer_permissions
+
+    @property
+    def gateway_endpoint_permissions(self):
+        return self._gateway_endpoint_permissions
+
+    @gateway_endpoint_permissions.setter
+    def gateway_endpoint_permissions(self, gateway_endpoint_permissions):
+        self._gateway_endpoint_permissions = gateway_endpoint_permissions
+
+    @property
+    def gateway_model_definition_permissions(self):
+        return self._gateway_model_definition_permissions
+
+    @gateway_model_definition_permissions.setter
+    def gateway_model_definition_permissions(self, gateway_model_definition_permissions):
+        self._gateway_model_definition_permissions = gateway_model_definition_permissions
+
+    @property
+    def gateway_secret_permissions(self):
+        return self._gateway_secret_permissions
+
+    @gateway_secret_permissions.setter
+    def gateway_secret_permissions(self, gateway_secret_permissions):
+        self._gateway_secret_permissions = gateway_secret_permissions
+
+    @property
+    def display_name(self):
+        return self._display_name
+
+    @display_name.setter
+    def display_name(self, display_name):
+        self._display_name = display_name
+
+    @property
+    def groups(self):
+        return self._groups
+
+    @property
+    def active(self) -> bool:
+        """Whether the account may authenticate.
+
+        Entra and other directories deprovision with ``PATCH active:false`` rather than a
+        delete, so this is the state a deprovisioned user lands in (issue #311).
+        """
+        return self._active
+
+    @property
+    def managed_by(self) -> str:
+        """Which source owns this row — ``manual``, ``scim`` or ``oidc:<provider_id>``."""
+        return self._managed_by
+
+    @property
+    def service_account_source(self) -> str | None:
+        """How a service account signs in: ``internal`` (tokens this plugin issues) or a provider id. None for a person."""
+        return self._service_account_source
+
+    @groups.setter
+    def groups(self, groups):
+        self._groups = groups
+
+    def to_json(self):
+        return {
+            "id": self.id,
+            "username": self.username,
+            "is_admin": self.is_admin,
+            "is_service_account": self.is_service_account,
+            "experiment_permissions": [p.to_json() for p in self.experiment_permissions],
+            "registered_model_permissions": [p.to_json() for p in self.registered_model_permissions],
+            "scorer_permissions": [p.to_json() for p in self.scorer_permissions],
+            "gateway_endpoint_permissions": [p.to_json() for p in self.gateway_endpoint_permissions],
+            "gateway_model_definition_permissions": [p.to_json() for p in self.gateway_model_definition_permissions],
+            "gateway_secret_permissions": [p.to_json() for p in self.gateway_secret_permissions],
+            "display_name": self.display_name,
+            "groups": [g.to_json() for g in self.groups] if self.groups else [],
+        }
+
+    def __delattr__(self, name: str) -> None:
+        """Allow tests to delete certain runtime attributes (used in tests).
+
+        If a test deletes a collection-like attribute (e.g. 'registered_model_permissions'),
+        reset it to an empty list instead of raising AttributeError from the property.
+        """
+        if name in (
+            "experiment_permissions",
+            "gateway_endpoint_permissions",
+            "gateway_model_definition_permissions",
+            "gateway_secret_permissions",
+            "groups",
+            "registered_model_permissions",
+            "scorer_permissions",
+        ):
+            # reset to empty list
+            object.__setattr__(self, f"_{name}", [])
+            return
+        # allow deleting other attributes normally
+        object.__delattr__(self, name)
+
+    @classmethod
+    def from_json(cls, dictionary):
+        return cls(
+            id_=dictionary.get("id"),
+            username=dictionary.get("username"),
+            display_name=dictionary.get("display_name"),
+            is_admin=bool(dictionary.get("is_admin", False)),
+            is_service_account=dictionary.get("is_service_account", False),
+            experiment_permissions=[ExperimentPermission.from_json(p) for p in dictionary.get("experiment_permissions", [])],
+            registered_model_permissions=[RegisteredModelPermission.from_json(p) for p in dictionary.get("registered_model_permissions", [])],
+            scorer_permissions=[ScorerPermission.from_json(p) for p in dictionary.get("scorer_permissions", [])],
+            gateway_endpoint_permissions=[GatewayEndpointPermission.from_json(p) for p in dictionary.get("gateway_endpoint_permissions", [])],
+            gateway_model_definition_permissions=[
+                GatewayModelDefinitionPermission.from_json(p) for p in dictionary.get("gateway_model_definition_permissions", [])
+            ],
+            gateway_secret_permissions=[GatewaySecretPermission.from_json(p) for p in dictionary.get("gateway_secret_permissions", [])],
+            groups=[Group.from_json(g) for g in dictionary.get("groups", [])],
+        )
+
+
+class UserGroup:
+    def __init__(self, user_id, group_id):
+        self._user_id = user_id
+        self._group_id = group_id
+
+    @property
+    def user_id(self):
+        return self._user_id
+
+    @property
+    def group_id(self):
+        return self._group_id
+
+    def to_json(self):
+        return {
+            "user_id": self.user_id,
+            "group_id": self.group_id,
+        }
+
+    @classmethod
+    def from_json(cls, dictionary):
+        user_id = dictionary["user_id"]
+        group_id = dictionary["group_id"]
+        try:
+            user_id = int(user_id)
+        except (TypeError, ValueError):
+            raise ValueError("user_id must be an integer")
+        try:
+            group_id = int(group_id)
+        except (TypeError, ValueError):
+            raise ValueError("group_id must be an integer")
+        return cls(
+            user_id=user_id,
+            group_id=group_id,
+        )

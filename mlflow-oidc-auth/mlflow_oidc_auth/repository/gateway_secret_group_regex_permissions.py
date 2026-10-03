@@ -1,0 +1,9 @@
+"""Gateway secret group regex permission repository."""
+
+from mlflow_oidc_auth.db.models import SqlGatewaySecretGroupRegexPermission
+from mlflow_oidc_auth.entities import GatewaySecretGroupRegexPermission
+from mlflow_oidc_auth.repository._base import BaseGroupRegexPermissionRepository
+
+
+class GatewaySecretPermissionGroupRegexRepository(BaseGroupRegexPermissionRepository[SqlGatewaySecretGroupRegexPermission, GatewaySecretGroupRegexPermission]):
+    model_class = SqlGatewaySecretGroupRegexPermission

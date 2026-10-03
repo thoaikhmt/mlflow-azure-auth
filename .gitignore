@@ -2,3 +2,8 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Vendored plugin build artifacts (generated in the image's `ui` stage).
+mlflow-oidc-auth/mlflow_oidc_auth/ui/
+mlflow-oidc-auth/web-react/node_modules/
+mlflow-oidc-auth/web-react/dist/

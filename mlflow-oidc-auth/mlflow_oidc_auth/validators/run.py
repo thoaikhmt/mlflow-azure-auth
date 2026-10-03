@@ -1,0 +1,128 @@
+from mlflow.server.handlers import _get_tracking_store
+from flask import request
+
+from mlflow_oidc_auth.permissions import Permission, intersect_permissions
+from mlflow_oidc_auth.utils import all_source_values, effective_experiment_permission, get_request_param_values, get_run_experiment_id
+from mlflow_oidc_auth.validators._referenced import nested_body_values, referenced_logged_model_permission, referenced_run_permission
+
+
+def _permission_for_run(run_id: str, username: str) -> Permission:
+    # run permissions inherit from parent resource (experiment)
+    # so we just get the experiment permission
+    experiment_id = get_run_experiment_id(_get_tracking_store(), run_id)
+    return effective_experiment_permission(experiment_id, username).permission
+
+
+def _get_permission_from_run_id(username: str) -> Permission:
+    # Every run the request names under run_id or run_uuid, in any source — MLflow acts
+    # on one of them, and the union means it does not matter which (issue #285).
+    return intersect_permissions(_permission_for_run(run_id, username) for run_id in get_request_param_values("run_id"))
+
+
+def validate_can_read_run(username: str) -> bool:
+    return _get_permission_from_run_id(username).can_read
+
+
+def validate_can_update_run(username: str) -> bool:
+    return _get_permission_from_run_id(username).can_update
+
+
+def validate_can_log_metrics(username: str) -> bool:
+    """Authorize LogMetric / LogBatch on the run and on every logged model they write to.
+
+    Mirrors MLflow's ``validate_can_log_metric`` / ``validate_can_log_batch``: UPDATE on
+    the run, and UPDATE on each logged model named by ``model_id`` (LogMetric) or by
+    ``metrics[].model_id`` (LogBatch). Every spelling and request source is read, so the
+    same validator serves both routes. A logged model that does not exist is denied.
+
+    Parameters:
+        username: The authenticated user.
+
+    Returns:
+        True when the caller may update the run and every referenced logged model.
+    """
+    if not validate_can_update_run(username):
+        return False
+    model_ids = [*all_source_values("model_id"), *nested_body_values("metrics", "model_id")]
+    return all(referenced_logged_model_permission(model_id, username).can_update for model_id in dict.fromkeys(str(m) for m in model_ids))
+
+
+def validate_can_update_run_or_logged_model(username: str) -> bool:
+    """Authorize CreatePresignedUploadUrl on the run or logged model it uploads to.
+
+    MLflow's own auth plugin accepts either ``run_id`` or ``model_id`` here and requires
+    UPDATE on whichever is given. Every ``run_id`` / ``run_uuid`` and every ``model_id``
+    in any request source must be updatable; a request naming neither, or naming a run or
+    logged model that does not exist, is denied.
+
+    Parameters:
+        username: The authenticated user.
+
+    Returns:
+        True when the caller may update every run and logged model the request names.
+    """
+    run_ids = all_source_values("run_id", "run_uuid")
+    model_ids = all_source_values("model_id")
+    if not run_ids and not model_ids:
+        return False
+    if not all(referenced_run_permission(run_id, username).can_update for run_id in run_ids):
+        return False
+    return all(referenced_logged_model_permission(model_id, username).can_update for model_id in model_ids)
+
+
+def validate_can_delete_run(username: str) -> bool:
+    return _get_permission_from_run_id(username).can_delete
+
+
+def validate_can_manage_run(username: str) -> bool:
+    return _get_permission_from_run_id(username).can_manage
+
+
+def validate_can_read_run_artifact(username: str) -> bool:
+    """Checks READ permission on run artifacts."""
+    return _get_permission_from_run_id(username).can_read
+
+
+def validate_can_update_run_artifact(username: str) -> bool:
+    """Checks UPDATE permission on run artifacts (POST /mlflow/upload-artifact).
+
+    Reads ``run_uuid`` from the QUERY STRING, because that is the only place MLflow's
+    ``upload_artifact_handler`` looks::
+
+        args = request.args
+        run_uuid = args.get("run_uuid")
+
+    The shared ``get_request_param`` helper reads the BODY on a POST, so the plugin
+    authorized the run named in the body while MLflow wrote the artifact into the run
+    named in the query string — the inverse of the #285 divergence, and a cross-tenant
+    artifact write (issue #288). This route is the only one bound to this validator, so
+    mirroring its handler exactly is safe.
+
+    A request with no ``run_uuid`` query parameter is refused rather than passed along:
+    MLflow rejects it with 400 regardless, and resolving nothing must never mean allow.
+    Every repetition of ``run_uuid`` in the query string must be updatable too (the
+    union rule). The BODY is deliberately not consulted: on this route it is the
+    artifact itself, so reading it as JSON would refuse an owner uploading a JSON file
+    that happens to contain a ``run_id``, and reading it as form data would consume a
+    multipart stream before the handler sees it.
+    """
+    run_id = request.args.get("run_uuid")
+    if not run_id:
+        return False
+    run_ids = list(dict.fromkeys([run_id, *(r for r in request.args.getlist("run_uuid") if r)]))
+    return all(_permission_for_run(r, username).can_update for r in run_ids)
+
+
+def validate_can_read_metric_history_bulk_interval(username: str) -> bool:
+    """Checks READ permission on all requested runs for the bulk interval endpoint.
+
+    Every run named under ``run_ids`` or ``run_id`` (some clients use the latter), in
+    any request source — not only the query string MLflow reads on this GET (#285).
+    """
+    run_ids = all_source_values("run_ids", "run_id")
+
+    for run_id in run_ids:
+        experiment_id = get_run_experiment_id(_get_tracking_store(), run_id)
+        if not effective_experiment_permission(experiment_id, username).permission.can_read:
+            return False
+    return True

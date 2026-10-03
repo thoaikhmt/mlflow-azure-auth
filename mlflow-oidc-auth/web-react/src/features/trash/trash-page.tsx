@@ -1,0 +1,368 @@
+import { useState, useMemo, useEffect } from "react";
+import { useParams, Link } from "react-router";
+import PageContainer from "../../shared/components/page/page-container";
+import PageStatus from "../../shared/components/page/page-status";
+import { SearchInput } from "../../shared/components/search-input";
+import { EntityListTable } from "../../shared/components/entity-list-table";
+import { useDeletedExperiments } from "../../core/hooks/use-deleted-experiments";
+import { useDeletedRuns } from "../../core/hooks/use-deleted-runs";
+import { useSearch } from "../../core/hooks/use-search";
+import { Button } from "../../shared/components/button";
+import { IconButton } from "../../shared/components/icon-button";
+import { faUndo, faTrash } from "@fortawesome/free-solid-svg-icons";
+import type { ColumnConfig } from "../../shared/types/table";
+import type { DeletedExperiment, DeletedRun } from "../../shared/types/entity";
+import { useToast } from "../../shared/components/toast/use-toast";
+import {
+  restoreExperiment,
+  restoreRun,
+  cleanupTrash,
+} from "../../core/services/trash-service";
+import { RemoveFromTrashModal } from "./remove-from-trash-modal";
+
+type TrashTab = "experiments" | "runs";
+
+interface TrashItem {
+  id: string;
+  name: string;
+  creation: number;
+  lastUpdate: number | null;
+  original: DeletedExperiment | DeletedRun;
+  type: TrashTab;
+  [key: string]: unknown;
+}
+
+export default function TrashPage() {
+  const { tab } = useParams<{ tab?: string }>();
+  const activeTab: TrashTab = tab === "runs" ? "runs" : "experiments";
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [isProcessing, setIsProcessing] = useState(false);
+  const { showToast } = useToast();
+  const [itemsToDelete, setItemsToDelete] = useState<TrashItem[] | null>(null);
+
+  const {
+    searchTerm,
+    submittedTerm,
+    handleInputChange,
+    handleSearchSubmit,
+    handleClearSearch,
+  } = useSearch();
+
+  // Both tabs page and search server-side; the search box is shared.
+  const {
+    deletedExperiments,
+    pagination: expPagination,
+    isLoading: isExpLoading,
+    error: expError,
+    refresh: refreshExp,
+  } = useDeletedExperiments(submittedTerm);
+
+  const {
+    deletedRuns,
+    pagination: runsPagination,
+    isLoading: isRunsLoading,
+    error: runsError,
+    refresh: refreshRuns,
+  } = useDeletedRuns(submittedTerm);
+
+  const isLoading = activeTab === "experiments" ? isExpLoading : isRunsLoading;
+  const error = activeTab === "experiments" ? expError : runsError;
+  const refresh = activeTab === "experiments" ? refreshExp : refreshRuns;
+  const pagination =
+    activeTab === "experiments" ? expPagination : runsPagination;
+
+  // Selection only ever covers visible rows: drop it when the tab, the page,
+  // the page size or the search changes.
+  const visiblePageKey = `${activeTab}:${pagination.page}:${String(pagination.pageSize)}:${submittedTerm}`;
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [visiblePageKey]);
+
+  const data: TrashItem[] = useMemo(() => {
+    if (activeTab === "experiments") {
+      return (deletedExperiments || []).map((e) => ({
+        id: e.experiment_id,
+        name: e.name,
+        creation: e.creation_time,
+        lastUpdate: e.last_update_time,
+        original: e,
+        type: "experiments",
+      }));
+    } else {
+      return (deletedRuns || []).map((r) => ({
+        id: r.run_id,
+        name: r.run_name || `Run ${r.run_id}`,
+        creation: r.start_time,
+        lastUpdate: r.end_time,
+        original: r,
+        type: "runs",
+      }));
+    }
+  }, [activeTab, deletedExperiments, deletedRuns]);
+
+  // Selection covers the rows on the current page.
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(new Set(data.map((item) => item.id)));
+    } else {
+      setSelectedIds(new Set());
+    }
+  };
+
+  const handleSelectOne = (id: string, checked: boolean) => {
+    const newSelected = new Set(selectedIds);
+    if (checked) {
+      newSelected.add(id);
+    } else {
+      newSelected.delete(id);
+    }
+    setSelectedIds(newSelected);
+  };
+
+  const handleRestore = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    setIsProcessing(true);
+    try {
+      if (activeTab === "experiments") {
+        await Promise.all(ids.map((id) => restoreExperiment(id)));
+      } else {
+        await Promise.all(ids.map((id) => restoreRun(id)));
+      }
+      showToast(`Successfully restored ${ids.length} item(s)`, "success");
+      setSelectedIds(new Set());
+      refresh();
+    } catch {
+      showToast("Failed to restore items", "error");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDeleteClick = (ids: string[]) => {
+    if (ids.length === 0) return;
+    const items = data.filter((item) => ids.includes(item.id));
+    setItemsToDelete(items);
+  };
+
+  const confirmDelete = async () => {
+    if (!itemsToDelete || itemsToDelete.length === 0) return;
+    setIsProcessing(true);
+    const ids = itemsToDelete.map((item) => item.id);
+
+    try {
+      const result =
+        activeTab === "experiments"
+          ? await cleanupTrash({ experiment_ids: ids.join(",") })
+          : await cleanupTrash({ run_ids: ids.join(",") });
+
+      // The endpoint returns 200 even when some items could not be permanently deleted
+      // (e.g. their artifacts could not be removed, so the item was kept rather than
+      // risking orphaned artifacts - and, transitively, an experiment that still owns such a
+      // run is kept too and reported in `failed_experiments`) - surface that instead of
+      // reporting full success. The endpoint only ever reports failures for ids in this
+      // request (deleting by run_ids alone no longer sweeps other trashed experiments), but
+      // clamp at zero anyway so a malformed response can never show a negative success count.
+      const failures =
+        activeTab === "experiments"
+          ? result.failed_experiments
+          : result.failed_runs;
+      const failedCount = failures?.length ?? 0;
+      const succeededCount = Math.max(ids.length - failedCount, 0);
+
+      if (failedCount > 0) {
+        const reasons = failures?.map((f) => f.error).join("; ");
+        showToast(
+          succeededCount > 0
+            ? `Deleted ${succeededCount} item(s); ${failedCount} could not be deleted and were kept: ${reasons}`
+            : `Failed to delete ${failedCount} item(s): ${reasons}`,
+          "error",
+        );
+      } else {
+        showToast(`Successfully deleted ${ids.length} item(s)`, "success");
+      }
+      setSelectedIds(new Set());
+      setItemsToDelete(null);
+      refresh();
+    } catch {
+      showToast("Failed to delete items", "error");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const columns: ColumnConfig<TrashItem>[] = [
+    {
+      header: (
+        <div className="flex items-center justify-center">
+          <input
+            type="checkbox"
+            className="w-4 h-4 rounded custom-checkbox"
+            checked={
+              data.length > 0 &&
+              selectedIds.size === data.length
+            }
+            onChange={(e) => handleSelectAll(e.target.checked)}
+          />
+        </div>
+      ),
+      id: "select",
+      render: (item) => (
+        <div className="flex items-center justify-center">
+          <input
+            type="checkbox"
+            className="w-4 h-4 rounded custom-checkbox"
+            checked={selectedIds.has(item.id)}
+            onChange={(e) => handleSelectOne(item.id, e.target.checked)}
+          />
+        </div>
+      ),
+      className: "w-8 m-[2px] flex-none",
+    },
+    {
+      header: "Experiment ID",
+      render: (item: TrashItem) => item.original.experiment_id,
+    },
+    {
+      header: "Name",
+      render: (item) => (
+        <span className="truncate block" title={item.name}>
+          {item.name}
+        </span>
+      ),
+    },
+    {
+      header: "Creation",
+      render: (item) => {
+        const dateStr = new Date(item.creation).toLocaleString();
+        return (
+          <span className="truncate block" title={dateStr}>
+            {dateStr}
+          </span>
+        );
+      },
+    },
+    {
+      header: "Last Update",
+      render: (item) => {
+        const dateStr = item.lastUpdate
+          ? new Date(item.lastUpdate).toLocaleString()
+          : "-";
+        return (
+          <span className="truncate block" title={dateStr}>
+            {dateStr}
+          </span>
+        );
+      },
+    },
+    {
+      header: "Actions",
+      render: (item) => (
+        <div className="flex space-x-2">
+          <IconButton
+            icon={faUndo}
+            title="Restore"
+            onClick={() => {
+              void handleRestore([item.id]);
+            }}
+            disabled={isProcessing}
+          />
+          <IconButton
+            icon={faTrash}
+            title="Delete Permanently"
+            onClick={() => {
+              void handleDeleteClick([item.id]);
+            }}
+            disabled={isProcessing}
+          />
+        </div>
+      ),
+      className: "w-24",
+    },
+  ];
+
+  return (
+    <PageContainer title="Trash">
+      <div className="flex justify-between items-center border-b border-btn-secondary-border dark:border-btn-secondary-border-dark mb-3">
+        <div className="flex space-x-4">
+          {[
+            { id: "experiments", label: "Experiments" },
+            { id: "runs", label: "Runs" },
+          ].map((tab) => (
+            <Link
+              key={tab.id}
+              to={`/trash/${tab.id}`}
+              className={`py-2 px-4 border-b-2 font-medium text-sm transition-colors duration-200 ${
+                activeTab === tab.id
+                  ? "border-btn-primary text-btn-primary dark:border-btn-primary-dark dark:text-btn-primary-dark"
+                  : "border-transparent text-text-primary dark:text-text-primary-dark hover:text-text-primary-hover dark:hover:text-text-primary-hover-dark hover:border-btn-secondary-border dark:hover:border-btn-secondary-border-dark"
+              }`}
+            >
+              {tab.label}
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      <PageStatus
+        isLoading={isLoading}
+        loadingText={`Loading ${activeTab}...`}
+        error={error}
+        onRetry={refresh}
+      />
+
+      {!isLoading && !error && (
+        <>
+          <div className="mt-2 mb-3 flex items-center justify-between gap-6">
+            <SearchInput
+              value={searchTerm}
+              onInputChange={handleInputChange}
+              onSubmit={handleSearchSubmit}
+              onClear={handleClearSearch}
+              placeholder={`Search ${activeTab}...`}
+            />
+            <div className="flex space-x-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  void handleRestore(Array.from(selectedIds));
+                }}
+                disabled={selectedIds.size === 0 || isProcessing}
+              >
+                Restore
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  void handleDeleteClick(Array.from(selectedIds));
+                }}
+                disabled={selectedIds.size === 0 || isProcessing}
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+
+          <EntityListTable
+            data={data}
+            pagination={pagination}
+            columns={columns}
+            searchTerm={submittedTerm}
+          />
+        </>
+      )}
+      {itemsToDelete && (
+        <RemoveFromTrashModal
+          isOpen={!!itemsToDelete}
+          onClose={() => setItemsToDelete(null)}
+          onConfirm={() => {
+            void confirmDelete();
+          }}
+          items={itemsToDelete}
+          itemType={activeTab}
+          isProcessing={isProcessing}
+        />
+      )}
+    </PageContainer>
+  );
+}

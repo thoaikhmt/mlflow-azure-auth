@@ -11,32 +11,72 @@
 # build `xmlsec` from source and the `-full` image lacks the dev headers, and
 # Entra ID SSO is plain OIDC.
 #
-# The plugin comes from the fork thoaikhmt/mlflow-oidc-auth, pinned to the commit
-# that fixes --static-prefix handling (`_prefix.py` derived the API path set from
-# the static prefix, so prefixed UI paths were denied with 401 JSON instead of
-# redirecting to login). Bump MLFLOW_OIDC_AUTH_REF when the fix moves.
+# The plugin is VENDORED under ./mlflow-oidc-auth (a copy of the
+# thoaikhmt/mlflow-oidc-auth fork at b8f0f67, which fixes --static-prefix
+# handling in `_prefix.py`) so we own and can patch it. Installing straight from
+# the GitHub source tarball silently shipped NO admin UI: `mlflow_oidc_auth/ui`
+# is the React build output, is git-ignored, and is not part of the archive, so
+# `pip install` produced a wheel without it and every `/oidc/ui/*` request died
+# with `RuntimeError: UI directory not found`. The `ui` stage below builds the
+# frontend first; the runtime stage installs the plugin from source with the
+# built assets in place. We also fixed `hack/menu.html`, whose relative
+# `oidc/ui/user` / `logout` links resolved under /mlflow and 404'd.
+
+# ── Stage 1: build the React admin UI into mlflow_oidc_auth/ui ──────────────
+# Vite is configured with `outDir: ../mlflow_oidc_auth/ui`, so building from
+# web-react/ writes the bundle into the sibling package directory.
+FROM node:24-bookworm-slim AS ui
+
+WORKDIR /plugin
+
+# The node:24 image already ships yarn 1.22.22, which honours the v1 yarn.lock.
+RUN yarn --version
+
+COPY mlflow-oidc-auth/web-react/package.json mlflow-oidc-auth/web-react/yarn.lock ./web-react/
+RUN yarn --cwd web-react install --frozen-lockfile
+
+COPY mlflow-oidc-auth/web-react/ ./web-react/
+RUN yarn --cwd web-react build \
+    && test -f mlflow_oidc_auth/ui/index.html
+
+# ── Stage 2: runtime image (official -full + vendored plugin + built UI) ────
 FROM ghcr.io/mlflow/mlflow:v3.16.1-full
 
 ARG MLFLOW_VERSION=3.16.1
-ARG MLFLOW_OIDC_AUTH_REF=b8f0f67506127233b68d6dc8245ef7c1e1134fee
+ARG MLFLOW_OIDC_AUTH_VERSION=7.0.0
 
 USER root
 
+# Stamp the plugin's dynamic version (setuptools reads this at build time)
+# instead of the source default `7.0.0.dev0`.
+ENV MLFLOW_OIDC_AUTH_VERSION=${MLFLOW_OIDC_AUTH_VERSION}
+
+# Copy the vendored plugin source, then overwrite/ensure the built UI is present.
+COPY mlflow-oidc-auth/ /opt/mlflow-oidc-auth/
+COPY --from=ui /plugin/mlflow_oidc_auth/ui /opt/mlflow-oidc-auth/mlflow_oidc_auth/ui
+
 RUN pip install --no-cache-dir \
         "mlflow==${MLFLOW_VERSION}" \
-        "mlflow-oidc-auth @ https://github.com/thoaikhmt/mlflow-oidc-auth/archive/${MLFLOW_OIDC_AUTH_REF}.tar.gz"
+        /opt/mlflow-oidc-auth
 
-# Fail the build if the plugin (or a driver it needs) is not importable. The
-# Entra ID group plugin resolves group object IDs to names via Microsoft Graph.
+# Fail the build if the plugin (or a driver it needs) is not importable, or if
+# the admin UI did not make it into the installed package. The Entra ID group
+# plugin resolves group object IDs to names via Microsoft Graph.
 RUN python - <<'PY'
 import importlib.metadata as md
+import os
 
 import mlflow
 import mlflow_oidc_auth  # noqa: F401  (registers the `oidc-auth` MLflow app)
 from mlflow_oidc_auth.plugins import group_detection_microsoft_entra_id  # noqa: F401
 
+ui_dir = os.path.join(os.path.dirname(mlflow_oidc_auth.__file__), "ui")
+index = os.path.join(ui_dir, "index.html")
+assert os.path.isfile(index), f"admin UI missing from installed package: {index}"
+
 print("mlflow                 ", mlflow.__version__)
 print("mlflow-oidc-auth       ", md.version("mlflow-oidc-auth"))
+print("admin UI               ", ui_dir)
 print("psycopg2-binary        ", md.version("psycopg2-binary"))
 print("boto3                  ", md.version("boto3"))
 PY

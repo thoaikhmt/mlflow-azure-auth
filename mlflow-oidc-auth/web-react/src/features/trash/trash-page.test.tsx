@@ -1,0 +1,446 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import TrashPage from "./trash-page";
+import { MemoryRouter, Route, Routes } from "react-router";
+import * as trashService from "../../core/services/trash-service";
+import * as useDeletedExperimentsModule from "../../core/hooks/use-deleted-experiments";
+import * as useDeletedRunsModule from "../../core/hooks/use-deleted-runs";
+import * as useSearchModule from "../../core/hooks/use-search";
+import * as useToastModule from "../../shared/components/toast/use-toast";
+
+vi.mock("../../core/services/trash-service");
+vi.mock("../../core/hooks/use-deleted-experiments");
+vi.mock("../../core/hooks/use-deleted-runs");
+vi.mock("../../core/hooks/use-search");
+vi.mock("../../shared/components/toast/use-toast");
+
+describe("TrashPage", () => {
+  const mockShowToast = vi.fn();
+  const mockRefreshExp = vi.fn();
+  const mockRefreshRuns = vi.fn();
+
+  const mockExperiments = [
+    {
+      experiment_id: "exp1",
+      name: "Exp 1",
+      creation_time: 1000,
+      last_update_time: 2000,
+    },
+    {
+      experiment_id: "exp2",
+      name: "Exp 2",
+      creation_time: 3000,
+      last_update_time: 4000,
+    },
+  ];
+
+  const mockRuns = [
+    {
+      run_id: "run1",
+      run_name: "Run 1",
+      start_time: 1000,
+      end_time: 2000,
+      experiment_id: "exp1",
+    },
+  ];
+
+  const pagination = (total: number) => ({
+    total,
+    page: 1,
+    pageSize: 20 as const,
+    onPageChange: vi.fn(),
+  });
+
+  const defaultSearch = {
+    searchTerm: "",
+    submittedTerm: "",
+    handleInputChange: vi.fn(),
+    handleSearchSubmit: vi.fn(),
+    handleClearSearch: vi.fn(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(useToastModule, "useToast").mockReturnValue({
+      showToast: mockShowToast,
+      removeToast: vi.fn(),
+    } as unknown as ReturnType<typeof useToastModule.useToast>);
+    vi.spyOn(useSearchModule, "useSearch").mockReturnValue(
+      defaultSearch as unknown as ReturnType<typeof useSearchModule.useSearch>,
+    );
+
+    vi.spyOn(
+      useDeletedExperimentsModule,
+      "useDeletedExperiments",
+    ).mockReturnValue({
+      deletedExperiments: mockExperiments,
+      total: mockExperiments.length,
+      pagination: pagination(mockExperiments.length),
+      isLoading: false,
+      error: null,
+      refresh: mockRefreshExp,
+    } as unknown as ReturnType<
+      typeof useDeletedExperimentsModule.useDeletedExperiments
+    >);
+
+    vi.spyOn(useDeletedRunsModule, "useDeletedRuns").mockReturnValue({
+      deletedRuns: mockRuns,
+      total: mockRuns.length,
+      pagination: pagination(mockRuns.length),
+      isLoading: false,
+      error: null,
+      refresh: mockRefreshRuns,
+    } as unknown as ReturnType<typeof useDeletedRunsModule.useDeletedRuns>);
+  });
+
+  const renderWithRouter = (initialEntry = "/trash/experiments") => {
+    return render(
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/trash/:tab" element={<TrashPage />} />
+          <Route path="/trash" element={<TrashPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  };
+
+  it("renders experiments tab by default", () => {
+    renderWithRouter();
+    expect(screen.getByText("Exp 1")).toBeDefined();
+    expect(screen.getByText("Exp 2")).toBeDefined();
+    expect(screen.queryByText("Run 1")).toBeNull();
+  });
+
+  it("renders runs tab when navigated", () => {
+    renderWithRouter("/trash/runs");
+    expect(screen.getByText("Run 1")).toBeDefined();
+    expect(screen.queryByText("Exp 1")).toBeNull();
+  });
+
+  it("handles search submission", () => {
+    renderWithRouter();
+    const searchInput = screen.getByPlaceholderText(/Search experiments/i);
+    fireEvent.change(searchInput, { target: { value: "test" } });
+    fireEvent.submit(searchInput.closest("form")!);
+    expect(defaultSearch.handleSearchSubmit).toHaveBeenCalled();
+  });
+
+  it("sends the submitted search to both server-paginated lists", () => {
+    vi.spyOn(useSearchModule, "useSearch").mockReturnValue({
+      ...defaultSearch,
+      searchTerm: "Exp 1",
+      submittedTerm: "Exp 1",
+    } as unknown as ReturnType<typeof useSearchModule.useSearch>);
+
+    renderWithRouter();
+    expect(
+      useDeletedExperimentsModule.useDeletedExperiments,
+    ).toHaveBeenCalledWith("Exp 1");
+    expect(useDeletedRunsModule.useDeletedRuns).toHaveBeenCalledWith("Exp 1");
+    // Filtering is the server's job now: rows are rendered as returned.
+    expect(screen.getByText("Exp 2")).toBeDefined();
+  });
+
+  it("handles individual selection", () => {
+    renderWithRouter();
+    const checkboxes = screen.getAllByRole("checkbox");
+    // checkboxes[0] is select-all, [1] is item1, [2] is item2
+    fireEvent.click(checkboxes[1]);
+
+    const restoreButtons = screen.getAllByRole("button", {
+      name: /^Restore$/i,
+    });
+    const deleteButtons = screen.getAllByRole("button", { name: /^Delete$/i });
+
+    expect(restoreButtons[0]).not.toBeDisabled();
+    expect(deleteButtons[0]).not.toBeDisabled();
+  });
+
+  it("handles select all", () => {
+    renderWithRouter();
+    const selectAll = screen.getAllByRole("checkbox")[0];
+    fireEvent.click(selectAll);
+
+    const restoreButton = screen.getAllByRole("button", {
+      name: /^Restore$/i,
+    })[0];
+    expect(restoreButton).not.toBeDisabled();
+  });
+
+  it("handles restoring an item", async () => {
+    vi.spyOn(trashService, "restoreExperiment").mockResolvedValue(
+      {} as unknown as { message: string },
+    );
+    renderWithRouter();
+
+    const restoreIcons = screen.getAllByTitle("Restore");
+    fireEvent.click(restoreIcons[0]);
+
+    await waitFor(() => {
+      expect(trashService.restoreExperiment).toHaveBeenCalledWith("exp1");
+    });
+    expect(mockShowToast).toHaveBeenCalledWith(
+      expect.stringContaining("restored"),
+      "success",
+    );
+    expect(mockRefreshExp).toHaveBeenCalled();
+  });
+
+  it("handles permanent deletion (single item)", async () => {
+    vi.spyOn(trashService, "cleanupTrash").mockResolvedValue({
+      deleted_runs: [],
+      deleted_experiments: ["exp2"],
+      total_deleted_runs: 0,
+      total_deleted_experiments: 1,
+    });
+    renderWithRouter();
+
+    const deleteIcons = screen.getAllByTitle("Delete Permanently");
+    fireEvent.click(deleteIcons[1]); // exp2
+
+    expect(screen.getByText(/Remove from trash/i)).toBeDefined();
+    expect(screen.getByText(/will be permanently deleted/i)).toBeDefined();
+
+    // Use a more specific selector for the modal confirm button
+    const confirmButton = screen
+      .getByText("Delete Permanently", { selector: "button span" })
+      .closest("button")!;
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => {
+      expect(trashService.cleanupTrash).toHaveBeenCalledWith({
+        experiment_ids: "exp2",
+      });
+    });
+    expect(mockShowToast).toHaveBeenCalledWith(
+      expect.stringContaining("deleted"),
+      "success",
+    );
+  });
+
+  it("handles bulk operations", async () => {
+    vi.spyOn(trashService, "restoreExperiment").mockResolvedValue(
+      {} as unknown as { message: string },
+    );
+    renderWithRouter();
+
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[1]);
+    fireEvent.click(checkboxes[2]);
+
+    const restoreButton = screen.getAllByRole("button", {
+      name: /^Restore$/i,
+    })[0];
+    fireEvent.click(restoreButton);
+
+    await waitFor(() => {
+      expect(trashService.restoreExperiment).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("handles errors during restore", async () => {
+    vi.spyOn(trashService, "restoreExperiment").mockRejectedValue(
+      new Error("Fail"),
+    );
+    renderWithRouter();
+
+    const restoreIcons = screen.getAllByTitle("Restore");
+    fireEvent.click(restoreIcons[0]);
+
+    await waitFor(() => {
+      expect(mockShowToast).toHaveBeenCalledWith(
+        expect.stringContaining("Failed"),
+        "error",
+      );
+    });
+  });
+
+  it("handles runs tab interactions", async () => {
+    vi.spyOn(trashService, "restoreRun").mockResolvedValue(
+      {} as unknown as { message: string },
+    );
+    renderWithRouter("/trash/runs");
+
+    const restoreIcons = screen.getAllByTitle("Restore");
+    fireEvent.click(restoreIcons[0]);
+
+    await waitFor(() => {
+      expect(trashService.restoreRun).toHaveBeenCalledWith("run1");
+    });
+    expect(mockRefreshRuns).toHaveBeenCalled();
+  });
+
+  it("surfaces a per-run failure instead of reporting full success (#239)", async () => {
+    // The endpoint returns 200 even when a run's artifacts could not be deleted - the run is
+    // kept (not hard-deleted) and reported in `failed_runs` instead. The UI must not tell the
+    // user the item was deleted when it was not.
+    vi.spyOn(trashService, "cleanupTrash").mockResolvedValue({
+      deleted_runs: [],
+      deleted_experiments: [],
+      total_deleted_runs: 0,
+      total_deleted_experiments: 0,
+      failed_runs: [{ run_id: "run1", error: "Failed to delete artifacts" }],
+    });
+    renderWithRouter("/trash/runs");
+
+    const deleteIcons = screen.getAllByTitle("Delete Permanently");
+    fireEvent.click(deleteIcons[0]);
+
+    const confirmButton = screen
+      .getByText("Delete Permanently", { selector: "button span" })
+      .closest("button")!;
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => {
+      expect(trashService.cleanupTrash).toHaveBeenCalledWith({
+        run_ids: "run1",
+      });
+    });
+    expect(mockShowToast).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to delete artifacts"),
+      "error",
+    );
+  });
+
+  it("reports a mixed batch of successes and failures on bulk delete (#239)", async () => {
+    vi.spyOn(trashService, "cleanupTrash").mockResolvedValue({
+      deleted_experiments: ["exp1"],
+      deleted_runs: [],
+      total_deleted_runs: 0,
+      total_deleted_experiments: 1,
+      failed_experiments: [{ experiment_id: "exp2", error: "boom" }],
+    });
+    renderWithRouter();
+
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[1]); // exp1
+    fireEvent.click(checkboxes[2]); // exp2
+
+    const deleteButton = screen.getAllByRole("button", {
+      name: /^Delete$/i,
+    })[0];
+    fireEvent.click(deleteButton);
+
+    const confirmButton = screen
+      .getByText("Delete Permanently", { selector: "button span" })
+      .closest("button")!;
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => {
+      expect(mockShowToast).toHaveBeenCalledWith(
+        expect.stringContaining("Deleted 1 item(s); 1 could not be deleted"),
+        "error",
+      );
+    });
+  });
+
+  it("surfaces an experiment kept because one of its runs was kept (#239 review round 1)", async () => {
+    // When a run's artifacts could not be deleted, the run is kept, and so is its experiment
+    // (hard-deleting the experiment would cascade-delete the kept run). The backend reports
+    // that under `failed_experiments`, which is exactly what the Experiments tab reads.
+    vi.spyOn(trashService, "cleanupTrash").mockResolvedValue({
+      deleted_runs: [],
+      deleted_experiments: [],
+      total_deleted_runs: 0,
+      total_deleted_experiments: 0,
+      failed_experiments: [
+        {
+          experiment_id: "exp1",
+          error: "1 run(s) kept: artifact deletion failed",
+        },
+      ],
+    });
+    renderWithRouter();
+
+    const deleteIcons = screen.getAllByTitle("Delete Permanently");
+    fireEvent.click(deleteIcons[0]); // exp1
+
+    const confirmButton = screen
+      .getByText("Delete Permanently", { selector: "button span" })
+      .closest("button")!;
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => {
+      expect(mockShowToast).toHaveBeenCalledWith(
+        expect.stringContaining("run(s) kept: artifact deletion failed"),
+        "error",
+      );
+    });
+  });
+
+  it("never reports a negative success count even if a response carries more failures than requested (#239 review round 2)", async () => {
+    // Deleting by run_ids alone no longer sweeps other trashed experiments (#239 review round
+    // 2), so the backend can no longer report a failure for an id outside this request. Keep a
+    // defensive clamp anyway: a response with more failure entries than selected ids must never
+    // read as a negative "succeeded" count.
+    vi.spyOn(trashService, "cleanupTrash").mockResolvedValue({
+      deleted_runs: [],
+      deleted_experiments: [],
+      total_deleted_runs: 0,
+      total_deleted_experiments: 0,
+      failed_runs: [
+        { run_id: "run1", error: "failure 1" },
+        { run_id: "run1", error: "failure 2" },
+      ],
+    });
+    renderWithRouter("/trash/runs");
+
+    const deleteIcons = screen.getAllByTitle("Delete Permanently");
+    fireEvent.click(deleteIcons[0]); // run1
+
+    const confirmButton = screen
+      .getByText("Delete Permanently", { selector: "button span" })
+      .closest("button")!;
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => {
+      expect(trashService.cleanupTrash).toHaveBeenCalledWith({
+        run_ids: "run1",
+      });
+    });
+    expect(mockShowToast).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to delete 2 item(s)"),
+      "error",
+    );
+    expect(mockShowToast).not.toHaveBeenCalledWith(
+      expect.stringMatching(/-\d/),
+      expect.anything(),
+    );
+  });
+
+  it("renders loading and error states", () => {
+    vi.spyOn(
+      useDeletedExperimentsModule,
+      "useDeletedExperiments",
+    ).mockReturnValue({
+      deletedExperiments: [],
+      total: 0,
+      pagination: pagination(0),
+      isLoading: true,
+      error: null,
+      refresh: mockRefreshExp,
+    } as unknown as ReturnType<
+      typeof useDeletedExperimentsModule.useDeletedExperiments
+    >);
+
+    const { unmount } = renderWithRouter();
+    expect(screen.getByText(/Loading/i)).toBeDefined();
+    unmount();
+
+    vi.spyOn(
+      useDeletedExperimentsModule,
+      "useDeletedExperiments",
+    ).mockReturnValue({
+      deletedExperiments: [],
+      total: 0,
+      pagination: pagination(0),
+      isLoading: false,
+      error: "Error",
+      refresh: mockRefreshExp,
+    } as unknown as ReturnType<
+      typeof useDeletedExperimentsModule.useDeletedExperiments
+    >);
+    renderWithRouter();
+    expect(screen.getByText(/Error/i)).toBeDefined();
+  });
+});

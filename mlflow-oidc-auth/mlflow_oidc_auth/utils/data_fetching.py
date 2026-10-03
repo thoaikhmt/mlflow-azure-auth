@@ -1,0 +1,427 @@
+"""
+Data fetching utilities for MLflow resources.
+
+This module provides functions to fetch experiments, registered models, logged models,
+and gateway endpoints from MLflow stores with proper pagination and permission filtering.
+All functions handle pagination automatically to ensure complete data retrieval.
+
+Key Features:
+- Automatic pagination handling for large datasets
+- Permission-based filtering for security
+- Support for both complete and paginated data retrieval
+- Efficient memory usage through streaming pagination
+- Gateway endpoint fetching from MLflow's unified gateway
+"""
+
+import inspect
+from typing import Any, Dict, List, Optional
+
+from mlflow.entities import Experiment
+from mlflow.entities.model_registry import RegisteredModel
+from mlflow.server.handlers import _get_model_registry_store, _get_tracking_store
+from mlflow.store.entities.paged_list import PagedList
+from mlflow.store.tracking.abstract_store import AbstractStore
+from mlflow.store.tracking.sqlalchemy_store import SqlAlchemyStore
+
+from mlflow_oidc_auth.utils.permissions import can_read_experiment, can_read_registered_model, effective_experiment_permission
+
+
+def fetch_all_registered_models(
+    filter_string: Optional[str] = None, order_by: Optional[List[str]] = None, max_results_per_page: int = 1000
+) -> List[RegisteredModel]:
+    """
+    Fetch ALL registered models from the MLflow model registry using pagination.
+    This ensures we get all models, not just the first page.
+
+    Args:
+        filter_string: Filter string for the search
+        order_by: List of order by clauses
+        max_results_per_page: Maximum number of results to fetch per page (default: 1000)
+
+    Returns:
+        List of ALL RegisteredModel objects
+    """
+    all_models = []
+    page_token = None
+
+    while True:
+        result = _get_model_registry_store().search_registered_models(
+            filter_string=filter_string, max_results=max_results_per_page, order_by=order_by, page_token=page_token
+        )
+
+        all_models.extend(result)
+
+        # Check if there are more pages
+        if hasattr(result, "token") and result.token:
+            page_token = result.token
+        else:
+            break
+
+    return all_models
+
+
+def fetch_all_experiments(
+    view_type: int = 1, max_results_per_page: int = 1000, order_by: Optional[List[str]] = None, filter_string: Optional[str] = None  # ACTIVE_ONLY
+) -> List[Experiment]:
+    """
+    Fetch ALL experiments from the MLflow tracking store using pagination.
+    This ensures we get all experiments, not just the first page.
+
+    Args:
+        view_type: ViewType for experiments (1=ACTIVE_ONLY, 2=DELETED_ONLY, 3=ALL)
+        max_results_per_page: Maximum number of results to fetch per page (default: 1000)
+        order_by: List of order by clauses
+        filter_string: Filter string for the search
+
+    Returns:
+        List of ALL Experiment objects
+    """
+    all_experiments = []
+    page_token = None
+
+    while True:
+        result = _get_tracking_store().search_experiments(
+            view_type=view_type,
+            max_results=max_results_per_page,
+            order_by=order_by,
+            filter_string=filter_string,
+            page_token=page_token,
+        )
+
+        all_experiments.extend(result)
+
+        # Check if there are more pages
+        if hasattr(result, "token") and result.token:
+            page_token = result.token
+        else:
+            break
+
+    return all_experiments
+
+
+def fetch_all_prompts(max_results_per_page: int = 1000) -> List[RegisteredModel]:
+    """
+    Fetch ALL registered models that are marked as prompts using pagination.
+    This ensures we get all prompts, not just the first page.
+
+    Args:
+        max_results_per_page: Maximum number of results to fetch per page (default: 1000)
+
+    Returns:
+        List of ALL RegisteredModel objects that are prompts
+    """
+    filter_string = "tags.`mlflow.prompt.is_prompt` = 'true'"
+    return fetch_all_registered_models(filter_string=filter_string, max_results_per_page=max_results_per_page)
+
+
+def fetch_registered_models_paginated(
+    filter_string: Optional[str] = None, max_results: int = 1000, order_by: Optional[List[str]] = None, page_token=None
+) -> PagedList[RegisteredModel]:
+    """
+    Fetch registered models with pagination support.
+
+    Args:
+        filter_string: Filter string for the search
+        max_results: Maximum number of results to return
+        order_by: List of order by clauses
+        page_token: Token for pagination
+
+    Returns:
+        PagedList of RegisteredModel objects
+    """
+    return _get_model_registry_store().search_registered_models(
+        filter_string=filter_string,
+        max_results=max_results,
+        order_by=order_by,
+        page_token=page_token,
+    )
+
+
+def fetch_experiments_paginated(
+    view_type: int = 1,
+    max_results: int = 1000,
+    order_by: Optional[List[str]] = None,
+    filter_string: Optional[str] = None,
+    page_token=None,  # ACTIVE_ONLY
+) -> PagedList[Experiment]:
+    """
+    Fetch experiments with pagination support.
+
+    Args:
+        view_type: ViewType for experiments (1=ACTIVE_ONLY, 2=DELETED_ONLY, 3=ALL)
+        max_results: Maximum number of results to return
+        order_by: List of order by clauses
+        filter_string: Filter string for the search
+        page_token: Token for pagination
+
+    Returns:
+        PagedList of Experiment objects
+    """
+    return _get_tracking_store().search_experiments(
+        view_type=view_type,
+        max_results=max_results,
+        order_by=order_by,
+        filter_string=filter_string,
+        page_token=page_token,
+    )
+
+
+def fetch_readable_experiments(
+    username: str,
+    view_type: int = 1,
+    max_results_per_page: int = 1000,
+    order_by: Optional[List[str]] = None,
+    filter_string: Optional[str] = None,
+) -> List[Experiment]:
+    """
+    Fetch ALL experiments that the user can read from the MLflow tracking store using pagination.
+    This ensures we get all readable experiments, not just the first page.
+
+    Args:
+        view_type: ViewType for experiments (1=ACTIVE_ONLY, 2=DELETED_ONLY, 3=ALL)
+        max_results_per_page: Maximum number of results to fetch per page (default: 1000)
+        order_by: List of order by clauses
+        filter_string: Filter string for the search
+        username: Username to check permissions for (defaults to current user)
+
+    Returns:
+        List of Experiment objects that the user can read
+    """
+    # Get all experiments matching the filter
+    all_experiments = fetch_all_experiments(view_type=view_type, max_results_per_page=max_results_per_page, order_by=order_by, filter_string=filter_string)
+
+    # Filter by permissions
+    readable_experiments = [experiment for experiment in all_experiments if can_read_experiment(experiment.experiment_id, username)]
+
+    return readable_experiments
+
+
+def fetch_readable_registered_models(
+    username: str,
+    filter_string: Optional[str] = None,
+    order_by: Optional[List[str]] = None,
+    max_results_per_page: int = 1000,
+) -> List[RegisteredModel]:
+    """
+    Fetch ALL registered models that the user can read from the MLflow model registry using pagination.
+    This ensures we get all readable models, not just the first page.
+
+    Args:
+        filter_string: Filter string for the search
+        order_by: List of order by clauses
+        max_results_per_page: Maximum number of results to fetch per page (default: 1000)
+        username: Username to check permissions for (defaults to current user)
+
+    Returns:
+        List of RegisteredModel objects that the user can read
+    """
+
+    # Get all models matching the filter
+    all_models = fetch_all_registered_models(filter_string=filter_string, order_by=order_by, max_results_per_page=max_results_per_page)
+
+    # Filter by permissions
+    readable_models = [model for model in all_models if can_read_registered_model(model.name, username)]
+
+    return readable_models
+
+
+def fetch_readable_logged_models(
+    username: str,
+    experiment_ids: Optional[List[str]] = None,
+    filter_string: Optional[str] = None,
+    order_by: Optional[List[dict]] = None,
+    max_results_per_page: int = 1000,
+) -> List:
+    """
+    Fetch ALL logged models that the user can read from the MLflow tracking store using pagination.
+    This ensures we get all readable logged models, not just the first page.
+
+    Args:
+        experiment_ids: List of experiment IDs to search within
+        filter_string: Filter string for the search
+        order_by: List of order by clauses
+        max_results_per_page: Maximum number of results to fetch per page (default: 1000)
+        username: Username to check permissions for (defaults to current user)
+
+    Returns:
+        List of LoggedModel objects that the user can read
+    """
+
+    all_models = []
+    page_token = None
+    tracking_store = _get_tracking_store()
+
+    # Parameters for search
+    params = {
+        "experiment_ids": experiment_ids or [],
+        "filter_string": filter_string,
+        "order_by": order_by,
+    }
+
+    while True:
+        result = tracking_store.search_logged_models(max_results=max_results_per_page, page_token=page_token, **params)
+
+        # Filter models based on read permissions
+        for model in result:
+            if effective_experiment_permission(model.experiment_id, username).permission.can_read:
+                all_models.append(model)
+
+        # Check if there are more pages
+        if hasattr(result, "token") and result.token:
+            page_token = result.token
+        else:
+            break
+
+    return all_models
+
+
+def fetch_all_gateway_endpoints() -> List[Dict[str, Any]]:
+    """
+    Fetch ALL gateway endpoints from the MLflow tracking store.
+
+    This function retrieves gateway endpoints from MLflow's unified gateway store,
+    which stores endpoint configurations for the AI Gateway.
+
+    Returns:
+        List of gateway endpoint dictionaries containing endpoint metadata.
+        Each dictionary includes fields like 'endpoint_id', 'name', 'model_mappings', etc.
+    """
+    all_endpoints: List[Dict[str, Any]] = []
+
+    result = _get_tracking_store().list_gateway_endpoints()
+
+    # Convert endpoint objects to dictionaries if needed
+    for endpoint in result:
+        if hasattr(endpoint, "to_dict"):
+            all_endpoints.append(endpoint.to_dict())
+        elif hasattr(endpoint, "__dict__"):
+            all_endpoints.append(vars(endpoint))
+        else:
+            all_endpoints.append(endpoint)
+
+    return all_endpoints
+
+
+def fetch_all_gateway_secrets() -> List[Dict[str, Any]]:
+    """
+    Fetch ALL gateway secrets from the MLflow tracking store.
+
+    Returns:
+        List of gateway secret dictionaries.
+    """
+    all_secrets: List[Dict[str, Any]] = []
+
+    # MLflow uses list_secret_infos for gateway secrets
+    result = _get_tracking_store().list_secret_infos()
+
+    for secret in result:
+        if hasattr(secret, "to_dict"):
+            all_secrets.append(secret.to_dict())
+        elif hasattr(secret, "__dict__"):
+            all_secrets.append(vars(secret))
+        else:
+            all_secrets.append(secret)
+
+    return all_secrets
+
+
+def fetch_all_gateway_model_definitions() -> List[Dict[str, Any]]:
+    """
+    Fetch ALL gateway model definitions from the MLflow tracking store.
+
+    Returns:
+        List of gateway model definition dictionaries.
+    """
+    all_models: List[Dict[str, Any]] = []
+
+    result = _get_tracking_store().list_gateway_model_definitions()
+
+    for model in result:
+        if hasattr(model, "to_dict"):
+            all_models.append(model.to_dict())
+        elif hasattr(model, "__dict__"):
+            all_models.append(vars(model))
+        else:
+            all_models.append(model)
+
+    return all_models
+
+
+def fetch_all_mcp_servers() -> List[Dict[str, Any]]:
+    """Fetch every MCP server of the request's workspace from MLflow's MCP server registry.
+
+    The registry exists from MLflow 3.15; on an older MLflow there is nothing to list.
+
+    Returns:
+        One dictionary per server with ``name``, ``display_name``, ``description``, ``status``,
+        ``latest_version`` and ``workspace``.
+    """
+    store = _get_tracking_store()
+    if not hasattr(store, "search_mcp_servers"):
+        return []
+    servers: List[Dict[str, Any]] = []
+    page_token = None
+    while True:
+        page = store.search_mcp_servers(max_results=1000, page_token=page_token)
+        for server in page:
+            status = getattr(server, "status", None)
+            servers.append(
+                {
+                    "name": server.name,
+                    "display_name": getattr(server, "display_name", None),
+                    "description": getattr(server, "description", None),
+                    "status": str(status) if status is not None else None,
+                    "latest_version": getattr(server, "latest_version", None),
+                    "workspace": getattr(server, "workspace", None),
+                }
+            )
+        page_token = getattr(page, "token", None)
+        if not page_token:
+            break
+    return servers
+
+
+def _has_run_row_lookup() -> bool:
+    """Whether MLflow's SQL store still has ``_get_run(session, run_uuid)``.
+
+    ``get_run`` is built on this private method. If an MLflow release changes it,
+    ``get_run_experiment_id`` falls back to ``get_run``: checks get slower, not broken.
+    """
+    lookup = getattr(SqlAlchemyStore, "_get_run", None)
+    return lookup is not None and {"session", "run_uuid"} <= set(inspect.signature(lookup).parameters)
+
+
+_RUN_ROW_LOOKUP = _has_run_row_lookup()
+
+
+def get_run_experiment_id(tracking_store: AbstractStore, run_id: str) -> str:
+    """
+    Return the id of the experiment a run belongs to, without loading the whole run.
+
+    A run inherits its permissions from its experiment, so a run-scoped check needs only
+    this id. ``get_run`` on MLflow's SQL store also loads every latest metric, param and
+    tag of the run, plus its inputs and outputs (7 statements on MLflow 3.14 to 3.16), and
+    builds an entity for every row. For a run with thousands of metric keys, each check
+    then costs as much as a ``runs/get``, even on a route that reads one metric key.
+
+    On MLflow's SQL store (workspace-aware or not) this reads the run's own row, with the
+    query that ``get_run`` itself runs, minus the eager loads. MLflow's own write paths
+    (``log_batch``, ``set_tag``) use the same query. The workspace scoping and the
+    ``RESOURCE_DOES_NOT_EXIST`` error are the same as ``get_run``. Every other store, a SQL
+    store subclass that overrides ``get_run``, and an MLflow release without that private
+    query (``_has_run_row_lookup``) go through ``get_run``.
+
+    Args:
+        tracking_store: The MLflow tracking store.
+        run_id: The run ID.
+
+    Returns:
+        The experiment ID, as a string, like ``Run.info.experiment_id``.
+
+    Raises:
+        MlflowException: When the run cannot be resolved, as ``get_run`` raises.
+    """
+    if _RUN_ROW_LOOKUP and getattr(type(tracking_store), "get_run", None) is SqlAlchemyStore.get_run:
+        with tracking_store.ManagedSessionMaker() as session:
+            return str(tracking_store._get_run(session=session, run_uuid=run_id).experiment_id)
+    return tracking_store.get_run(run_id).info.experiment_id

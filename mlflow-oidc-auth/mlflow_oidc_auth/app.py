@@ -1,0 +1,342 @@
+"""
+FastAPI application factory for MLflow OIDC Auth Plugin.
+
+This module provides a FastAPI application factory that can be used as an alternative
+to the default MLflow server when OIDC authentication is required.
+"""
+
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
+from fastapi import APIRouter, FastAPI
+from mlflow.server import app
+from mlflow.version import VERSION
+from starlette.middleware.sessions import (
+    SessionMiddleware as StarletteSessionMiddleware,
+)
+
+from mlflow_oidc_auth.config import config
+from mlflow_oidc_auth.exceptions import register_exception_handlers
+from mlflow_oidc_auth.graphql import install_mlflow_graphql_authorization_middleware
+from mlflow_oidc_auth.hooks import after_request_hook, before_request_hook
+from mlflow_oidc_auth.logger import get_logger
+from mlflow_oidc_auth.middleware import (
+    AuthAwareWSGIMiddleware,
+    AuthMiddleware,
+    ProxyHeadersMiddleware,
+    WorkspaceContextMiddleware,
+    add_fastapi_permission_middleware,
+)
+from mlflow_oidc_auth.middleware.route_path import static_prefix_conflicts
+from mlflow_oidc_auth.oauth import ensure_all_clients_registered
+from mlflow_oidc_auth.routers import ajax_alias_router, get_all_routers
+
+logger = get_logger()
+
+# Global flag to track OIDC initialization status for health checks
+_oidc_initialized: bool = False
+# Per-provider registration outcome from startup. ``_oidc_initialized`` answers the readiness
+# question — can this process serve a login at all — which stays True when one of several
+# providers failed, because failing the startup probe would pull the pod from service while it
+# can still authenticate everyone else. This dict is what says *which* ones are broken (#315).
+_oidc_provider_status: dict[str, bool] = {}
+
+
+def is_oidc_ready() -> bool:
+    """Check if OIDC client has been initialized at startup.
+
+    Returns:
+        True if OIDC was successfully registered during app startup.
+    """
+    return _oidc_initialized
+
+
+def get_oidc_provider_status() -> dict[str, bool]:
+    """Per-provider registration outcome from startup.
+
+    ``is_oidc_ready()`` alone cannot express a partial failure, and with several providers a
+    partial failure is an expected state rather than an exceptional one.
+    """
+    return dict(_oidc_provider_status)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """FastAPI lifespan context manager for startup/shutdown events.
+
+    Ensures OIDC client is registered at startup before the app accepts requests.
+    This is critical for multi-replica deployments where any replica may receive
+    /callback or /logout requests that require the OIDC client to be registered.
+    """
+    global _oidc_initialized, _oidc_provider_status
+
+    # Startup: Register OIDC client
+    logger.info("Starting MLflow OIDC Auth Plugin...")
+    # Every provider is registered independently, so one that is misconfigured or whose
+    # discovery document is unreachable does not disable login for the others (#315).
+    results = ensure_all_clients_registered()
+    _oidc_provider_status = results
+    registered = [provider_id for provider_id, ok in results.items() if ok]
+    failed = [provider_id for provider_id, ok in results.items() if not ok]
+
+    if registered:
+        _oidc_initialized = True
+        logger.info("OIDC client(s) successfully registered at startup: %s", ", ".join(sorted(registered)))
+    if failed:
+        logger.warning(
+            "OIDC client registration failed at startup for: %s. "
+            "This may indicate missing configuration (OIDC_CLIENT_ID, OIDC_DISCOVERY_URL, and a client secret: "
+            "OIDC_CLIENT_SECRET, or OIDC_CLIENT_SECRET_<PROVIDER_ID> for an additional provider). A provider without a "
+            'secret must be declared a public client (OIDC_PUBLIC_CLIENT=true, or "public_client": true on its registry '
+            "entry), which also requires PKCE (OIDC_CODE_CHALLENGE) and no secret. An error logged for each such provider names the setting to change. "
+            "Those providers will not be available until configuration is corrected.",
+            ", ".join(sorted(failed)),
+        )
+    if not results:
+        logger.warning(
+            "No OIDC client was registered at startup. "
+            "This may indicate missing configuration (OIDC_CLIENT_ID, OIDC_DISCOVERY_URL, and either OIDC_CLIENT_SECRET "
+            "or OIDC_PUBLIC_CLIENT=true for a public client). "
+            "OIDC authentication will not be available until configuration is corrected."
+        )
+
+    yield  # App runs here
+
+    # Shutdown: Cleanup if needed
+    logger.info("Shutting down MLflow OIDC Auth Plugin...")
+
+
+def _seed_default_workspace() -> None:
+    """Seed the default workspace in MLflow's workspace store if it doesn't already exist.
+
+    Called at app startup when MLFLOW_ENABLE_WORKSPACES is enabled.
+    Uses MLflow's native workspace store API to create the 'default' workspace.
+    """
+    from mlflow.server.handlers import _get_workspace_store
+    from mlflow.store.workspace import Workspace
+
+    DEFAULT_WORKSPACE = "default"
+
+    try:
+        ws_store = _get_workspace_store()
+        # Check if default workspace already exists
+        try:
+            ws_store.get_workspace(DEFAULT_WORKSPACE)
+            logger.debug(f"Default workspace '{DEFAULT_WORKSPACE}' already exists")
+        except Exception:
+            # Workspace doesn't exist — create it
+            ws_store.create_workspace(
+                Workspace(
+                    name=DEFAULT_WORKSPACE,
+                    description="Default workspace",
+                )
+            )
+            logger.info(f"Default workspace '{DEFAULT_WORKSPACE}' created")
+    except Exception as e:
+        logger.warning(f"Could not seed default workspace: {e}")
+
+
+def _include_router(oidc_app: FastAPI, router: APIRouter) -> None:
+    """Register a router, plus the "/ajax-api" twins of its "/api" routes.
+
+    MLflow's web UI calls "/ajax-api/..." while API clients call "/api/...".
+    Registering both keeps UI-facing endpoints reachable; see
+    `mlflow_oidc_auth.routers.ajax_alias_router`.
+    """
+    oidc_app.include_router(router)
+    alias = ajax_alias_router(router)
+    if alias.routes:
+        oidc_app.include_router(alias)
+
+
+def _include_mlflow_fastapi_routers(oidc_app: FastAPI) -> None:
+    """Include MLflow's FastAPI-native routers in our application.
+
+    These routers serve endpoints that are NOT handled by Flask and must be
+    registered directly on the FastAPI app.  They are included BEFORE the
+    Flask WSGI mount so FastAPI routes take precedence.
+
+    Each router is imported and included individually with graceful fallback
+    so the plugin continues to work if a particular MLflow module is missing
+    (e.g. older MLflow versions without the assistant or job API).
+    """
+    # OTel trace ingestion: /v1/traces
+    try:
+        from mlflow.server.otel_api import otel_router
+
+        oidc_app.include_router(otel_router)
+        logger.info("Included MLflow OTel router (/v1/traces)")
+    except ImportError:
+        logger.debug("mlflow.server.otel_api not available — OTel endpoints disabled")
+
+    # Job API: /ajax-api/3.0/jobs/*
+    try:
+        from mlflow.server.job_api import job_api_router
+
+        oidc_app.include_router(job_api_router)
+        logger.info("Included MLflow Job API router (/ajax-api/3.0/jobs)")
+    except ImportError:
+        logger.debug("mlflow.server.job_api not available — Job API endpoints disabled")
+
+    # AI Gateway invocations: /gateway/*
+    try:
+        from mlflow.server.gateway_api import gateway_router
+
+        oidc_app.include_router(gateway_router)
+        logger.info("Included MLflow Gateway router (/gateway)")
+    except ImportError:
+        logger.debug("mlflow.server.gateway_api not available — Gateway endpoints disabled")
+
+    # AI Assistant: /ajax-api/3.0/mlflow/assistant/*
+    try:
+        from mlflow.server.assistant.api import assistant_router
+
+        oidc_app.include_router(assistant_router)
+        logger.info("Included MLflow Assistant router (/ajax-api/3.0/mlflow/assistant)")
+    except ImportError:
+        logger.debug("mlflow.server.assistant.api not available — Assistant endpoints disabled")
+
+    # MCP server registry: /api/3.0/mlflow/mcp-servers/* and the /ajax-api twin.
+    # The router carries no prefix of its own; MLflow mounts one copy per prefix,
+    # so we do the same rather than going through `_include_router`.
+    try:
+        from mlflow.server.mcp_server_api import get_mcp_server_api_route_prefixes, mcp_server_router
+
+        for route_prefix in get_mcp_server_api_route_prefixes():
+            oidc_app.include_router(mcp_server_router, prefix=route_prefix)
+        logger.info("Included MLflow MCP server registry router (/api/3.0/mlflow/mcp-servers)")
+    except ImportError:
+        logger.debug("mlflow.server.mcp_server_api not available — MCP registry endpoints disabled")
+
+
+def add_middleware_stack(oidc_app: FastAPI) -> None:
+    """Install the plugin's middleware on ``oidc_app`` in its required order.
+
+    Kept separate from ``create_app`` so tests exercise exactly this order.
+
+    Parameters:
+        oidc_app: The FastAPI application to configure.
+    """
+    # ---------------------------------------------------------------------------
+    # Middleware ordering (Starlette executes LAST-added as OUTERMOST):
+    #
+    #   Request → ProxyHeaders → Session → WorkspaceContext → Auth
+    #             → PermissionMiddleware → route handler
+    #
+    # ProxyHeaders MUST be OUTERMOST so the forwarded prefix it records in
+    # scope["root_path"] is known before AuthMiddleware and PermissionMiddleware
+    # decide anything: both make their decisions on the routed path (the path
+    # with root_path removed, which is what the router dispatches on).
+    #
+    # PermissionMiddleware MUST be added FIRST (innermost) so it runs AFTER
+    # AuthMiddleware has set request.state.username / is_admin.
+    #
+    # Session must wrap Auth, which reads request.session.
+    # ---------------------------------------------------------------------------
+    add_fastapi_permission_middleware(oidc_app)
+    oidc_app.add_middleware(AuthMiddleware)
+    oidc_app.add_middleware(WorkspaceContextMiddleware)
+    oidc_app.add_middleware(
+        StarletteSessionMiddleware,
+        secret_key=config.SECRET_KEY,
+        session_cookie=config.SESSION_COOKIE_NAME,
+        max_age=config.SESSION_COOKIE_MAX_AGE_SECONDS,
+        same_site=config.SESSION_COOKIE_SAMESITE,
+        https_only=config.SESSION_COOKIE_SECURE,
+    )
+    oidc_app.add_middleware(ProxyHeadersMiddleware)
+
+
+def create_app() -> FastAPI:
+    """Create a FastAPI application with OIDC integration.
+
+    The app uses a lifespan context manager to ensure OIDC client registration
+    happens at startup, making the app ready for multi-replica deployments.
+    """
+    oidc_app = FastAPI(
+        title="MLflow Tracking Server with OIDC Auth",
+        description="MLflow Tracking Server API with OIDC Authentication",
+        version=VERSION,
+        docs_url="/docs" if config.ENABLE_API_DOCS else None,
+        redoc_url="/redoc" if config.ENABLE_API_DOCS else None,
+        openapi_url="/openapi.json" if config.ENABLE_API_DOCS else None,
+        lifespan=lifespan,
+    )
+    register_exception_handlers(oidc_app)
+
+    conflicts = static_prefix_conflicts()
+    if conflicts:
+        logger.error(
+            "MLflow's static prefix covers the plugin's unauthenticated routes %s; they will require a signed-in user. Choose a static prefix that does not overlap them.",
+            ", ".join(conflicts),
+        )
+
+    add_middleware_stack(oidc_app)
+
+    for router in get_all_routers():
+        _include_router(oidc_app, router)
+
+    # Inject into MLflow's index.html when the menu links or the re-auth helper
+    # are enabled. Both live in the same hack module to keep injection ordering
+    # predictable.
+    if config.EXTEND_MLFLOW_MENU or config.EXTEND_MLFLOW_REAUTH:
+        from mlflow_oidc_auth import hack
+
+        app.view_functions["serve"] = hack.index
+
+    # Set Flask app secret key
+    app.secret_key = config.SECRET_KEY
+
+    # Register Flask hooks directly with the Flask app
+    app.before_request(before_request_hook)
+    app.after_request(after_request_hook)
+
+    # Grants on name-keyed resources carry the resource's workspace; give one to any recorded before
+    # they did. Runs on every start, workspaces enabled or not, and never raises.
+    from mlflow_oidc_auth.grant_workspace_backfill import backfill_grant_workspaces
+
+    backfill_grant_workspaces()
+
+    # Seed default workspace and register workspace routers when workspaces are enabled (WSFND-04)
+    if config.MLFLOW_ENABLE_WORKSPACES:
+        _seed_default_workspace()
+        # A lowered WORKSPACE_RULES_MAX_PERMISSION takes effect on grants rules already made (#418).
+        from mlflow_oidc_auth.workspace_rules import enforce_ceiling
+
+        enforce_ceiling()
+        # Register all workspace routers only when workspaces are enabled
+        from mlflow_oidc_auth.routers.workspace_permissions import (
+            workspace_permissions_router,
+        )
+        from mlflow_oidc_auth.routers.workspace_regex_permissions import (
+            workspace_regex_permissions_router,
+        )
+
+        _include_router(oidc_app, workspace_permissions_router)
+        _include_router(oidc_app, workspace_regex_permissions_router)
+
+    # ---------------------------------------------------------------------------
+    # Include MLflow's FastAPI-native routers (GAP-ARCH-01 fix)
+    #
+    # These routers serve endpoints that bypass Flask entirely:
+    #   - otel_router:      /v1/traces — OpenTelemetry trace ingestion
+    #   - gateway_router:   /gateway/* — AI Gateway invocations
+    #   - assistant_router: /ajax-api/3.0/mlflow/assistant/* — AI assistant
+    #   - job_api_router:   /ajax-api/3.0/jobs/* — Job API
+    #
+    # They MUST be included BEFORE the Flask WSGI mount so FastAPI routes
+    # take precedence over the catch-all Flask mount.
+    # ---------------------------------------------------------------------------
+    _include_mlflow_fastapi_routers(oidc_app)
+
+    # Mount Flask app at root with auth passing middleware
+    oidc_app.mount("/", AuthAwareWSGIMiddleware(app))
+
+    logger.info("MLflow Flask app mounted at / with FastAPI auth info passing")
+    # Ensure MLflow's `/graphql` route applies our per-field authorization middleware.
+    install_mlflow_graphql_authorization_middleware()
+
+    return oidc_app
+
+
+app = create_app()
