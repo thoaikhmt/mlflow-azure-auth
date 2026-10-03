@@ -48,7 +48,12 @@ configured as an Entra-ID-shaped tenant:
 | -------- | -------------------------------------- | ---------------------------------------- | ------------------- |
 | `alice`  | `44444444-…`                           | `22222222-…`                              | logs in (non-admin) |
 | `admin`  | `55555555-…`                           | `22222222-…`, `33333333-…`                | logs in as admin    |
+| `carol`  | `77777777-…`                           | `88888888-…`, `22222222-…`                | logs in (non-admin) |
 | `bob`    | `66666666-…`                           | *(none)*                                  | refused by group gate |
+
+A user is admitted when **any** group in their `groups` list matches **any**
+entry in `OIDC_GROUP_NAME` (`carol` matches on `22222222-…` even though she also
+belongs to `88888888-…`); all her Entra groups are synced to MLflow.
 
 ### Entra ID claim mapping
 

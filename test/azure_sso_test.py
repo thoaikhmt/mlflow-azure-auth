@@ -35,6 +35,10 @@ ADMIN_GROUP = os.environ.get("OIDC_ADMIN_GROUP_NAME", "33333333-3333-3333-3333-3
 # The plugin is configured with OIDC_USERNAME_FIELD=oid, so the account name is
 # the immutable Entra object id, not the email/UPN.
 ALICE_USERNAME = os.environ.get("EXPECTED_USERNAME", "44444444-4444-4444-4444-444444444444")
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "55555555-5555-5555-5555-555555555555")
+CAROL_USERNAME = os.environ.get("CAROL_USERNAME", "77777777-7777-7777-7777-777777777777")
+# A group Carol belongs to that is NOT in the allowed list.
+UNRELATED_GROUP = "88888888-8888-8888-8888-888888888888"
 DISPLAY_NAME = os.environ.get("OIDC_PROVIDER_DISPLAY_NAME", "Sign in with Azure Entra ID")
 
 _failures: list[str] = []
@@ -120,11 +124,33 @@ def test_admin_group_grants_admin() -> None:
     check("admin callback completes the login", final.status_code == 302, f"got {final.status_code}")
     status = auth_status(session)
     check("admin session is authenticated", status.get("authenticated") is True, json.dumps(status))
+    check("admin username is the oid", status.get("username") == ADMIN_USERNAME, json.dumps(status))
 
     current = session.get(f"{MLFLOW}/api/2.0/mlflow/users/current")
     check("admin API call succeeds", current.status_code == 200, f"got {current.status_code}")
     if current.status_code == 200:
         check("admin group grants admin", current.json().get("is_admin") is True, current.text[:200])
+
+
+def test_any_matching_group_admits() -> None:
+    """A user in *several* groups is admitted if ANY of them matches the allowed list.
+
+    ``carol`` belongs to an unrelated group and the allowed group; membership of
+    the allowed group alone must let her in, and all her Entra groups are synced.
+    """
+    session, final = start_login("carol")
+    check("multi-group callback completes the login", final.status_code == 302, f"got {final.status_code} -> {final.headers.get('location')}")
+    status = auth_status(session)
+    check("user with one matching group is authenticated", status.get("authenticated") is True, json.dumps(status))
+    check("carol username is the oid", status.get("username") == CAROL_USERNAME, json.dumps(status))
+
+    current = session.get(f"{MLFLOW}/api/2.0/mlflow/users/current")
+    check("carol API call succeeds", current.status_code == 200, f"got {current.status_code}")
+    if current.status_code == 200:
+        user = current.json()
+        groups = [g.get("group_name") for g in user.get("groups", [])]
+        check("all of carol's Entra groups are synced", ALLOWED_GROUP in groups and UNRELATED_GROUP in groups, json.dumps(groups))
+        check("carol is not an admin", user.get("is_admin") is False, json.dumps(user))
 
 
 def test_user_outside_allowed_group_is_refused() -> None:
@@ -149,6 +175,7 @@ def main() -> int:
         test_unauthenticated_api_is_rejected,
         test_local_user_login,
         test_admin_group_grants_admin,
+        test_any_matching_group_admits,
         test_user_outside_allowed_group_is_refused,
     ]
     for test in tests:

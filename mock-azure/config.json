@@ -41,6 +41,24 @@
         },
         {
           "requestParam": "subject",
+          "match": "carol",
+          "claims": {
+            "sub": "carol-subject",
+            "oid": "77777777-7777-7777-7777-777777777777",
+            "tid": "11111111-2222-3333-4444-555555555555",
+            "upn": "carol@contoso.example",
+            "preferred_username": "carol@contoso.example",
+            "given_name": "Carol",
+            "family_name": "Example",
+            "name": "Carol Example",
+            "groups": [
+              "88888888-8888-8888-8888-888888888888",
+              "22222222-2222-2222-2222-222222222222"
+            ]
+          }
+        },
+        {
+          "requestParam": "subject",
           "match": "bob",
           "claims": {
             "sub": "bob-subject",
