@@ -25,9 +25,9 @@ if [ -z "$ENGINE" ]; then
   fi
 fi
 
-IMAGE="${IMAGE:-mlflow-azure-sso:test}"
+IMAGE="${IMAGE:-mlflow-azure-auth:test}"
 MOCK_IMAGE="${MOCK_IMAGE:-ghcr.io/navikt/mock-oauth2-server:6.0.4}"
-NET="${NET:-mlflow-azure-sso-test}"
+NET="${NET:-mlflow-azure-auth-test}"
 TENANT="${TENANT:-11111111-2222-3333-4444-555555555555}"
 
 # SELinux (Fedora/RHEL) blocks the container from reading the bind-mounted mock

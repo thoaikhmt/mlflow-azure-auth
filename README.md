@@ -1,4 +1,4 @@
-# mlflow-azure-sso
+# MLflow Azure Auth
 
 Custom [MLflow](https://mlflow.org/) tracking-server image that adds the
 `mlflow-oidc-auth` plugin so the server can authenticate against **Azure Entra
@@ -15,17 +15,19 @@ mlflow-oidc-auth/          vendored plugin source (see "Vendored plugin" below)
 test/mock-azure/config.json  simulated Entra ID tenant
 test/run-integration.sh    spins up MLflow + the mock and runs the test
 test/azure_sso_test.py     the assertions (login, groups, admin, denials, UI)
-.gitea/workflows/          build, push to Gitea, run the integration test
+.gitea/workflows/          build, push to Docker Hub, run the integration test
 ```
 
 ## Image
 
 ```
-gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.7
+docker.io/thoaikhmt/mlflow-azure-auth:v1.0.0
 ```
 
-Built and pushed by the Gitea Actions workflow on every push to `main`. It is
-the official `ghcr.io/mlflow/mlflow:v3.16.1-full` image plus:
+Built and pushed by the `.gitea/workflows/build-push.yaml` workflow: every push
+to `main` publishes `:latest`, and every `v*` git tag publishes an image with
+the same name as the tag (the first release is `v1.0.0`). It is the official
+`ghcr.io/mlflow/mlflow:v3.16.1-full` image plus:
 
 | Component          | Version |
 | ------------------ | ------- |
@@ -130,7 +132,7 @@ docker run --rm -p 5000:5000 \
   -e OIDC_USERS_DB_URI="postgresql+psycopg2://mlflow:pass@db:5432/mlflow" \
   -e OIDC_ALEMBIC_VERSION_TABLE="oidc_alembic_version" \
   -e SECRET_KEY="$(openssl rand -hex 32)" \
-  gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.7 \
+  thoaikhmt/mlflow-azure-auth:v1.0.0 \
   mlflow server --app-name oidc-auth --host 0.0.0.0 --port 5000 \
     --backend-store-uri postgresql:// --default-artifact-root s3://mlflow/
 ```

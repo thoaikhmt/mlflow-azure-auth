@@ -1,19 +1,30 @@
-# Build the custom MLflow image (official -full + mlflow-oidc-auth), push it to
-# the in-cluster Gitea container registry, then run the Entra ID SSO integration
-# test against a simulated Azure service.
-name: build-and-test
+# Build the custom MLflow image (official mlflow:v3.16.1-full + the vendored
+# mlflow-oidc-auth plugin) and push it to Docker Hub.
+#
+#   * push to `main`      -> docker.io/thoaikhmt/mlflow-azure-auth:latest
+#   * push a `v*` git tag -> docker.io/thoaikhmt/mlflow-azure-auth:<tag>
+#                             (first release: v1.0.0)
+#
+# Every build also gets an immutable `sha-<short>` tag.
+#
+# The image is pushed as a Docker schema2 manifest with no buildx
+# provenance/SBOM attestations (`--provenance=false --sbom=false` and
+# `oci-mediatypes=false`), so pull-through proxies such as Nexus can fetch it
+# (an OCI index with an `unknown/unknown` attestation fails there with
+# "could not fetch content descriptor ... not found").
+name: build-and-push
 
 on:
   push:
     branches:
       - main
+    tags:
+      - "v*"
   workflow_dispatch:
 
 env:
-  REGISTRY: gitea.localhost
-  IMAGE: gitea.localhost/gitea_admin/mlflow
-  TAG: v3.16.1-entra.7
-  # Gitea is served with a self-signed homelab CA the job image does not trust.
+  IMAGE: docker.io/thoaikhmt/mlflow-azure-auth
+  # The in-cluster Gitea uses a self-signed homelab CA the job image does not trust.
   GIT_SSL_NO_VERIFY: "true"
 
 jobs:
@@ -23,19 +34,36 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Log in to the Gitea container registry
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
         run: |
-          echo "${{ secrets.REGISTRY_PASSWORD }}" \
-            | docker login "$REGISTRY" \
-                --username "${{ secrets.REGISTRY_USERNAME }}" \
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" \
+            | docker login docker.io \
+                --username "${{ secrets.DOCKERHUB_USERNAME }}" \
                 --password-stdin
 
-      - name: Build and push image
+      - name: Build and push
         run: |
-          SHORT_SHA="$(echo "${{ github.sha }}" | cut -c1-7)"
-          docker build -t "$IMAGE:$TAG" -t "$IMAGE:$TAG-$SHORT_SHA" -f Containerfile .
-          docker push "$IMAGE:$TAG"
-          docker push "$IMAGE:$TAG-$SHORT_SHA"
+          set -euo pipefail
+          ref="${{ github.ref }}"
+          case "$ref" in
+            refs/tags/*) tag="${ref#refs/tags/}" ;;
+            refs/heads/main) tag="latest" ;;
+            *) echo "unsupported ref: ${ref}" >&2; exit 1 ;;
+          esac
+          short="$(echo "${{ github.sha }}" | cut -c1-7)"
+          echo "==> pushing ${IMAGE}:${tag} and ${IMAGE}:sha-${short}"
+          docker buildx build \
+            --file Containerfile \
+            --platform linux/amd64 \
+            --provenance=false \
+            --sbom=false \
+            --tag "${IMAGE}:${tag}" \
+            --tag "${IMAGE}:sha-${short}" \
+            --output type=image,push=true,oci-mediatypes=false \
+            .
 
   integration-test:
     runs-on: ubuntu-latest
@@ -44,17 +72,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Pull the pushed image
-        run: |
-          echo "${{ secrets.REGISTRY_PASSWORD }}" \
-            | docker login "$REGISTRY" \
-                --username "${{ secrets.REGISTRY_USERNAME }}" \
-                --password-stdin
-          docker pull "$IMAGE:$TAG"
-
       - name: Run the Azure Entra ID SSO integration test
         env:
           CONTAINER_ENGINE: docker
-          # Keep in sync with TAG above so the test runs the exact image built.
-          IMAGE: gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.7
         run: ./test/run-integration.sh
