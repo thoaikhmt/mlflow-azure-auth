@@ -12,8 +12,8 @@
   --color-ui-bg: rgb(255, 255, 255);
   --color-ui-text: rgb(22, 22, 22);
 
-  /* Header/Sidebar BG */
-  --color-ui-secondary-bg: rgb(246, 247, 249);
+  /* Header/Sidebar BG (MLflow's app shell is #F7F7F7 + a subtle gradient) */
+  --color-ui-secondary-bg: rgb(247, 247, 247);
 
   --color-logo: #2374bb;
 
@@ -130,6 +130,45 @@
   :where(.dark) body {
     color: var(--color-ui-text-dark);
     background-color: var(--color-ui-bg-dark);
+  }
+}
+
+@layer components {
+  /* MLflow app shell: #F7F7F7 with the DuBois "gradient-canvas" overlay
+     (blue -> purple -> red at 6%, fading out) behind the sidebar/header. */
+  .app-shell {
+    background-color: rgb(247, 247, 247);
+    background-image: linear-gradient(
+      163deg,
+      rgba(66, 153, 224, 0.06) 20%,
+      rgba(202, 66, 224, 0.06) 35%,
+      rgba(255, 95, 70, 0.06) 50%,
+      rgba(0, 0, 0, 0) 80%
+    );
+  }
+
+  :where(.dark) .app-shell {
+    background-color: var(--color-ui-bg-dark);
+    background-image: linear-gradient(
+      163deg,
+      rgba(66, 153, 224, 0.08) 20%,
+      rgba(202, 66, 224, 0.08) 35%,
+      rgba(255, 95, 70, 0.08) 50%,
+      rgba(0, 0, 0, 0) 80%
+    );
+  }
+
+  /* MLflow wordmark gradient, used for the "Permissions" brand text. */
+  .mlflow-gradient-text {
+    background-image: linear-gradient(
+      135deg,
+      rgb(66, 153, 224) 20.5%,
+      rgb(202, 66, 224) 46.91%,
+      rgb(255, 95, 70) 79.5%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
 }
 

@@ -35,10 +35,10 @@ const Header: React.FC<HeaderProps> = ({ userName = "User" }) => {
     <header className="h-[52px] shrink-0 flex items-center justify-between px-4 py-2">
       <Link
         to="/user"
-        className="flex items-center gap-2 text-xl font-extrabold text-logo"
+        className="flex items-center gap-2 text-xl font-extrabold"
       >
         <img src="favicon.svg" alt="Logo" className="w-6 h-6" />
-        Permissions
+        <span className="mlflow-gradient-text">Permissions</span>
       </Link>
 
       <div className="flex z-4">

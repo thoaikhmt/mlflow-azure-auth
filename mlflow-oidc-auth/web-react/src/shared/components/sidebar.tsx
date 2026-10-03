@@ -37,8 +37,9 @@ const Sidebar: React.FC<SidebarProps> = ({
   const AI_LINKS_COUNT = 3;
   const WORKSPACE_LINKS_COUNT = workspacesEnabled ? 1 : 0;
 
-  const baseSidebarClasses =
-    "flex-shrink-0 text-sm bg-ui-secondary-bg dark:bg-ui-secondary-bg-dark";
+  // Transparent so the MLflow app-shell gradient (behind the layout) shows
+  // through, exactly like MLflow's own sidebar.
+  const baseSidebarClasses = "flex-shrink-0 text-sm";
 
   return (
     <aside className={`${baseSidebarClasses} ${widthClass} overflow-y-auto`}>
