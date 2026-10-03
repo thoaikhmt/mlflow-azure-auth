@@ -22,7 +22,7 @@ test/azure_sso_test.py  the assertions (login, groups, admin, denials, UI)
 ## Image
 
 ```
-gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.3
+gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.4
 ```
 
 Built and pushed by the Gitea Actions workflow on every push to `main`. It is
@@ -132,7 +132,7 @@ docker run --rm -p 5000:5000 \
   -e OIDC_USERS_DB_URI="postgresql+psycopg2://mlflow:pass@db:5432/mlflow" \
   -e OIDC_ALEMBIC_VERSION_TABLE="oidc_alembic_version" \
   -e SECRET_KEY="$(openssl rand -hex 32)" \
-  gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.3 \
+  gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.4 \
   mlflow server --app-name oidc-auth --host 0.0.0.0 --port 5000 \
     --backend-store-uri postgresql:// --default-artifact-root s3://mlflow/
 ```

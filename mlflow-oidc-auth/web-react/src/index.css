@@ -3,8 +3,14 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
+  /* Match the MLflow UI (DuBois/Ant Design) so the Access Control pages read
+     identically: same font stack, base size, line-height and text colours. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+
   --color-ui-bg: rgb(255, 255, 255);
-  --color-ui-text: rgb(17, 23, 28);
+  --color-ui-text: rgb(22, 22, 22);
 
   /* Header/Sidebar BG */
   --color-ui-secondary-bg: rgb(246, 247, 249);
@@ -58,7 +64,7 @@
   --color-btn-disabled-text-dark: rgb(17, 23, 28);
 
   /* Icon/Menu */
-  --color-text-primary: rgb(95, 114, 129);
+  --color-text-primary: rgb(22, 22, 22);
   --color-text-primary-hover: rgb(14, 83, 139);
   --color-bg-primary-hover: rgba(34, 114, 180, 0.08);
 
@@ -105,6 +111,26 @@
   --color-bg-primary-hover-dark: rgba(138, 202, 255, 0.08);
 
   --color-table-row-hover-dark: rgba(189, 205, 219, 0.04);
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 18px;
+    color: var(--color-ui-text);
+    background-color: var(--color-ui-bg);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :where(.dark) body {
+    color: var(--color-ui-text-dark);
+    background-color: var(--color-ui-bg-dark);
+  }
 }
 
 @keyframes fastSpin {

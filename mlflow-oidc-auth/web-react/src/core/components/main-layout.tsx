@@ -29,7 +29,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   return (
     <div
       className="flex flex-col h-screen overflow-hidden relative
-    bg-ui-secondary-bg dark:bg-ui-secondary-bg-dark"
+    bg-ui-bg dark:bg-ui-bg-dark"
     >
       <Header userName={userName} />
       <main className="flex flex-1 overflow-hidden">
@@ -40,7 +40,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           widthClass={sidebarWidthClass}
         />
         <div
-          className="flex flex-col flex-1 overflow-hidden p-5 rounded-xl shadow-xl
+          className="flex flex-col flex-1 overflow-hidden p-6
         bg-ui-bg text-ui-text dark:bg-ui-bg-dark dark:text-ui-text-dark"
         >
           {children}
