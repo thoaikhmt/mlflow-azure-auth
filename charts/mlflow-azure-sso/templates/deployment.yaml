@@ -257,10 +257,6 @@ spec:
               value: {{ .Values.azureSso.providerDisplayName | quote }}
             - name: OIDC_GROUPS_ATTRIBUTE
               value: {{ .Values.azureSso.groupsAttribute | quote }}
-            {{- if .Values.azureSso.groupDetectionPlugin }}
-            - name: OIDC_GROUP_DETECTION_PLUGIN
-              value: {{ .Values.azureSso.groupDetectionPlugin | quote }}
-            {{- end }}
             - name: OIDC_GROUP_NAME
               value: {{ join "," .Values.azureSso.groupName | quote }}
             - name: OIDC_ADMIN_GROUP_NAME
