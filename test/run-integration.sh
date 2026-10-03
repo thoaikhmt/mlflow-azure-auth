@@ -83,6 +83,7 @@ run_suite() {
     -e OIDC_GROUPS_ATTRIBUTE=groups \
     -e OIDC_ALEMBIC_VERSION_TABLE=oidc_alembic_version \
     -e DEFAULT_MLFLOW_PERMISSION=MANAGE \
+    -e AUTOMATIC_LOGIN_REDIRECT=true \
     -e SESSION_COOKIE_SECURE=false \
     -e SESSION_COOKIE_SAMESITE=lax \
     -e OIDC_USERS_DB_URI="sqlite:////tmp/oidc-auth.db" \

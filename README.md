@@ -21,7 +21,7 @@ test/azure_sso_test.py  the assertions (login, groups, admin, denials)
 ## Image
 
 ```
-gitea.localhost/gitea_admin/mlflow:v3.16.1-entra
+gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.2
 ```
 
 Built and pushed by the Gitea Actions workflow on every push to `main`. It is
@@ -30,8 +30,19 @@ the official `ghcr.io/mlflow/mlflow:v3.16.1-full` image plus:
 | Component          | Version |
 | ------------------ | ------- |
 | MLflow             | 3.16.1 (pinned, `-full`) |
-| mlflow-oidc-auth   | 9.0.2 |
+| mlflow-oidc-auth   | `thoaikhmt/mlflow-oidc-auth` @ `b8f0f67` (fork patch below) |
 | psycopg2 / boto3   | from the `-full` base |
+
+### Plugin patch (static prefix)
+
+The plugin is installed from the fork pinned to commit `b8f0f67`, which fixes
+`mlflow_oidc_auth/routers/_prefix.py`: under `--static-prefix`, `_get_rest_path()`
+already includes the prefix, so the old code derived the API-path set from the
+prefix (e.g. `/mlflow`) and treated `/mlflow/...` as an API path — unauthenticated
+browsers got `401 {"detail":"Authentication required"}` instead of being
+redirected to login. The fix strips the prefix before deriving the segment and
+prepends it to the resulting `/api` · `/ajax-api` prefixes. Bump
+`MLFLOW_OIDC_AUTH_REF` in the `Containerfile` when the fix moves.
 
 ## Integration test (simulated Azure Entra ID)
 
@@ -101,7 +112,7 @@ docker run --rm -p 5000:5000 \
   -e OIDC_USERS_DB_URI="postgresql+psycopg2://mlflow:pass@db:5432/mlflow" \
   -e OIDC_ALEMBIC_VERSION_TABLE="oidc_alembic_version" \
   -e SECRET_KEY="$(openssl rand -hex 32)" \
-  gitea.localhost/gitea_admin/mlflow:v3.16.1-entra \
+  gitea.localhost/gitea_admin/mlflow:v3.16.1-entra.2 \
   mlflow server --app-name oidc-auth --host 0.0.0.0 --port 5000 \
     --backend-store-uri postgresql:// --default-artifact-root s3://mlflow/
 ```

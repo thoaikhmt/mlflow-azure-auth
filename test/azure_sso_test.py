@@ -175,10 +175,30 @@ def test_unauthenticated_api_is_rejected() -> None:
     check("unauthenticated API call is rejected", resp.status_code == 401, f"got {resp.status_code}")
 
 
+def test_unauthenticated_ui_redirects_to_login() -> None:
+    """A browser hitting the prefixed UI must be redirected to login, not 401.
+
+    Regression guard for the plugin deriving its API-path set from the static
+    prefix (which made /mlflow/... look like an API path and return 401 JSON).
+    """
+    resp = requests.get(
+        f"{API_BASE}/",
+        headers={"Sec-Fetch-Dest": "document", "Accept": "text/html"},
+        allow_redirects=False,
+    )
+    location = resp.headers.get("location", "")
+    check(
+        "unauthenticated UI redirects to login",
+        resp.status_code in (301, 302, 303, 307) and "/login" in location,
+        f"got {resp.status_code} location={location!r}",
+    )
+
+
 def main() -> int:
     tests = [
         test_provider_is_advertised,
         test_unauthenticated_api_is_rejected,
+        test_unauthenticated_ui_redirects_to_login,
         test_local_user_login,
         test_admin_group_grants_admin,
         test_any_matching_group_admits,

@@ -12,7 +12,7 @@ on:
 env:
   REGISTRY: gitea.localhost
   IMAGE: gitea.localhost/gitea_admin/mlflow
-  TAG: v3.16.1-entra
+  TAG: v3.16.1-entra.2
   # Gitea is served with a self-signed homelab CA the job image does not trust.
   GIT_SSL_NO_VERIFY: "true"
 

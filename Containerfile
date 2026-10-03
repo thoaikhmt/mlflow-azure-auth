@@ -10,16 +10,21 @@
 # Only the base package is installed on purpose: the `[saml]`/`[full]` extras
 # build `xmlsec` from source and the `-full` image lacks the dev headers, and
 # Entra ID SSO is plain OIDC.
+#
+# The plugin comes from the fork thoaikhmt/mlflow-oidc-auth, pinned to the commit
+# that fixes --static-prefix handling (`_prefix.py` derived the API path set from
+# the static prefix, so prefixed UI paths were denied with 401 JSON instead of
+# redirecting to login). Bump MLFLOW_OIDC_AUTH_REF when the fix moves.
 FROM ghcr.io/mlflow/mlflow:v3.16.1-full
 
 ARG MLFLOW_VERSION=3.16.1
-ARG MLFLOW_OIDC_AUTH_VERSION=9.0.2
+ARG MLFLOW_OIDC_AUTH_REF=b8f0f67506127233b68d6dc8245ef7c1e1134fee
 
 USER root
 
 RUN pip install --no-cache-dir \
         "mlflow==${MLFLOW_VERSION}" \
-        "mlflow-oidc-auth==${MLFLOW_OIDC_AUTH_VERSION}"
+        "mlflow-oidc-auth @ https://github.com/thoaikhmt/mlflow-oidc-auth/archive/${MLFLOW_OIDC_AUTH_REF}.tar.gz"
 
 # Fail the build if the plugin (or a driver it needs) is not importable. The
 # Entra ID group plugin resolves group object IDs to names via Microsoft Graph.
