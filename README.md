@@ -137,10 +137,9 @@ than a separate `mlflow_oidc` schema:
   histories do not collide on `alembic_version`.
 
 The schema must exist before either Alembic run. The k3s deployment re-asserts
-it in a `mlflow-db-migration` init container (overriding the chart's built-in
-one; the chart's `dbchecker` stays original) that runs a small Python script
-(`psycopg2`) before `mlflow server`: it waits for PostgreSQL, creates the schema
-if missing, initializes MLflow's own tables, and once drops the auth tables a
+it in a `dbchecker` init container (which replaces the chart's built-in one) that
+runs a small Python script (`psycopg2`) before `mlflow server`: it waits for
+PostgreSQL, creates the schema if missing and, once, drops the auth tables a
 previous MLflow basic-auth left behind (guarded on the plugin's own
 `oidc_alembic_version` table).
 
