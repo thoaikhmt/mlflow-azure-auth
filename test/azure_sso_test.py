@@ -28,6 +28,12 @@ import urllib.parse
 import requests
 
 MLFLOW = os.environ.get("MLFLOW_BASE", "http://mlflow:5000")
+# MLflow may run behind `--static-prefix` (the k3s deployment uses `/mlflow`).
+# MLflow's own UI/API move under the prefix, but the oidc-auth plugin's fixed
+# routes (`/login`, `/callback`, `/oidc/ui`, `/providers`, `/auth/status`) stay
+# at the server root, so the test uses two bases.
+STATIC_PREFIX = os.environ.get("MLFLOW_STATIC_PREFIX", "").rstrip("/")
+API_BASE = f"{MLFLOW}{STATIC_PREFIX}"
 PROVIDER = os.environ.get("OIDC_PROVIDER", "default")
 # Entra ID sends the group *object IDs* (GUIDs) in the `groups` claim.
 ALLOWED_GROUP = os.environ.get("OIDC_GROUP_NAME", "22222222-2222-2222-2222-222222222222")
@@ -106,7 +112,7 @@ def test_local_user_login() -> None:
     check("username comes from the Entra `oid` claim", status.get("username") == ALICE_USERNAME, json.dumps(status))
     check("provider display name is reported", status.get("provider") == DISPLAY_NAME, json.dumps(status))
 
-    current = session.get(f"{MLFLOW}/api/2.0/mlflow/users/current")
+    current = session.get(f"{API_BASE}/api/2.0/mlflow/users/current")
     check("authenticated API call succeeds", current.status_code == 200, f"got {current.status_code}: {current.text[:120]}")
     if current.status_code == 200:
         user = current.json()
@@ -115,7 +121,7 @@ def test_local_user_login() -> None:
         check("user is in the allowed group (by object id)", ALLOWED_GROUP in groups, json.dumps(user))
         check("normal user is not an admin", user.get("is_admin") is False, json.dumps(user))
 
-    created = session.post(f"{MLFLOW}/api/2.0/mlflow/experiments/create", json={"name": "azure-sso-test"})
+    created = session.post(f"{API_BASE}/api/2.0/mlflow/experiments/create", json={"name": "azure-sso-test"})
     check("authenticated user can create an experiment", created.status_code == 200, f"got {created.status_code}: {created.text[:120]}")
 
 
@@ -126,7 +132,7 @@ def test_admin_group_grants_admin() -> None:
     check("admin session is authenticated", status.get("authenticated") is True, json.dumps(status))
     check("admin username is the oid", status.get("username") == ADMIN_USERNAME, json.dumps(status))
 
-    current = session.get(f"{MLFLOW}/api/2.0/mlflow/users/current")
+    current = session.get(f"{API_BASE}/api/2.0/mlflow/users/current")
     check("admin API call succeeds", current.status_code == 200, f"got {current.status_code}")
     if current.status_code == 200:
         check("admin group grants admin", current.json().get("is_admin") is True, current.text[:200])
@@ -144,7 +150,7 @@ def test_any_matching_group_admits() -> None:
     check("user with one matching group is authenticated", status.get("authenticated") is True, json.dumps(status))
     check("carol username is the oid", status.get("username") == CAROL_USERNAME, json.dumps(status))
 
-    current = session.get(f"{MLFLOW}/api/2.0/mlflow/users/current")
+    current = session.get(f"{API_BASE}/api/2.0/mlflow/users/current")
     check("carol API call succeeds", current.status_code == 200, f"got {current.status_code}")
     if current.status_code == 200:
         user = current.json()
@@ -165,7 +171,7 @@ def test_user_outside_allowed_group_is_refused() -> None:
 
 
 def test_unauthenticated_api_is_rejected() -> None:
-    resp = requests.get(f"{MLFLOW}/api/2.0/mlflow/users/current")
+    resp = requests.get(f"{API_BASE}/api/2.0/mlflow/users/current")
     check("unauthenticated API call is rejected", resp.status_code == 401, f"got {resp.status_code}")
 
 

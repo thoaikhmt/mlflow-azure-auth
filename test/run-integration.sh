@@ -2,6 +2,10 @@
 # End-to-end integration test: the custom MLflow image + mlflow-oidc-auth
 # against a simulated Azure Entra ID (navikt/mock-oauth2-server).
 #
+# The suite runs twice: once bare and once with `--static-prefix=/mlflow`
+# (the way the k3s deployment serves MLflow), because the plugin keeps its
+# fixed routes at the server root while MLflow's UI/API move under the prefix.
+#
 #   ./test/run-integration.sh              # podman or docker
 #   IMAGE=my/mlflow:test ./test/run-integration.sh
 #
@@ -54,55 +58,71 @@ echo "==> starting simulated Azure Entra ID (mock-oauth2-server)"
   -e JSON_CONFIG_PATH=/config.json \
   "$MOCK_IMAGE" >/dev/null
 
-echo "==> starting MLflow ($IMAGE) with the oidc-auth plugin"
-"$ENGINE" run -d --name mlflow --network "$NET" \
-  -e OIDC_DISCOVERY_URL="http://mock-azure:8080/${TENANT}/.well-known/openid-configuration" \
-  -e OIDC_CLIENT_ID=mlflow-tracking \
-  -e OIDC_CLIENT_SECRET=mlflow-secret \
-  -e OIDC_REDIRECT_URI="http://mlflow:5000/callback" \
-  -e OIDC_SCOPE="openid,email,profile" \
-  -e OIDC_USERNAME_FIELD="oid" \
-  -e OIDC_DISPLAY_NAME_FIELD="name" \
-  -e OIDC_GROUP_NAME="22222222-2222-2222-2222-222222222222" \
-  -e OIDC_ADMIN_GROUP_NAME="33333333-3333-3333-3333-333333333333" \
-  -e OIDC_PROVIDER_DISPLAY_NAME="Sign in with Azure Entra ID" \
-  -e OIDC_GROUPS_ATTRIBUTE=groups \
-  -e OIDC_ALEMBIC_VERSION_TABLE=oidc_alembic_version \
-  -e DEFAULT_MLFLOW_PERMISSION=MANAGE \
-  -e SESSION_COOKIE_SECURE=false \
-  -e SESSION_COOKIE_SAMESITE=lax \
-  -e OIDC_USERS_DB_URI="sqlite:////tmp/oidc-auth.db" \
-  -e SECRET_KEY="integration-test-secret-key" \
-  "$IMAGE" \
-  mlflow server --app-name oidc-auth --host 0.0.0.0 --port 5000 \
-    --allowed-hosts='mlflow:*,localhost:*,127.0.0.1:*' \
-    --backend-store-uri sqlite:////tmp/mlflow.db \
-    --default-artifact-root /tmp/mlruns --workers 1 >/dev/null
+# Start MLflow (optionally with a static prefix), wait until healthy, then run
+# the test client on the same network.
+run_suite() {
+  local prefix="$1"
+  local label="${prefix:-<none>}"
+  local static_args=()
+  if [ -n "$prefix" ]; then static_args=(--static-prefix="$prefix"); fi
 
-echo "==> waiting for MLflow to become ready"
-ready=false
-for _ in $(seq 1 60); do
-  if "$ENGINE" exec mlflow python -c \
-      "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=3)" \
-      >/dev/null 2>&1; then
-    ready=true
-    break
+  echo
+  echo "==> MLflow suite: --static-prefix='${label}'"
+  "$ENGINE" rm -f mlflow >/dev/null 2>&1 || true
+  "$ENGINE" run -d --name mlflow --network "$NET" \
+    -e OIDC_DISCOVERY_URL="http://mock-azure:8080/${TENANT}/.well-known/openid-configuration" \
+    -e OIDC_CLIENT_ID=mlflow-tracking \
+    -e OIDC_CLIENT_SECRET=mlflow-secret \
+    -e OIDC_REDIRECT_URI="http://mlflow:5000/callback" \
+    -e OIDC_SCOPE="openid,email,profile" \
+    -e OIDC_USERNAME_FIELD="oid" \
+    -e OIDC_DISPLAY_NAME_FIELD="name" \
+    -e OIDC_GROUP_NAME="22222222-2222-2222-2222-222222222222" \
+    -e OIDC_ADMIN_GROUP_NAME="33333333-3333-3333-3333-333333333333" \
+    -e OIDC_PROVIDER_DISPLAY_NAME="Sign in with Azure Entra ID" \
+    -e OIDC_GROUPS_ATTRIBUTE=groups \
+    -e OIDC_ALEMBIC_VERSION_TABLE=oidc_alembic_version \
+    -e DEFAULT_MLFLOW_PERMISSION=MANAGE \
+    -e SESSION_COOKIE_SECURE=false \
+    -e SESSION_COOKIE_SAMESITE=lax \
+    -e OIDC_USERS_DB_URI="sqlite:////tmp/oidc-auth.db" \
+    -e SECRET_KEY="integration-test-secret-key" \
+    "$IMAGE" \
+    mlflow server --app-name oidc-auth --host 0.0.0.0 --port 5000 \
+      "${static_args[@]}" \
+      --allowed-hosts='mlflow:*,localhost:*,127.0.0.1:*' \
+      --backend-store-uri sqlite:////tmp/mlflow.db \
+      --default-artifact-root /tmp/mlruns --workers 1 >/dev/null
+
+  echo "==> waiting for MLflow to become ready"
+  local ready=false
+  for _ in $(seq 1 60); do
+    if "$ENGINE" exec mlflow python -c \
+        "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=3)" \
+        >/dev/null 2>&1; then
+      ready=true
+      break
+    fi
+    sleep 3
+  done
+  if [ "$ready" != true ]; then
+    echo "MLflow did not become ready; logs:" >&2
+    "$ENGINE" logs mlflow >&2 || true
+    exit 1
   fi
-  sleep 3
-done
-if [ "$ready" != true ]; then
-  echo "MLflow did not become ready; logs:" >&2
-  "$ENGINE" logs mlflow >&2 || true
-  exit 1
-fi
 
-echo "==> running integration test"
-"$ENGINE" run --rm --network "$NET" \
-  -v "$ROOT_DIR/test:/test:$MOUNT_OPTS" \
-  -e MLFLOW_BASE="http://mlflow:5000" \
-  -e OIDC_PROVIDER=default \
-  -e OIDC_GROUP_NAME="22222222-2222-2222-2222-222222222222" \
-  -e OIDC_ADMIN_GROUP_NAME="33333333-3333-3333-3333-333333333333" \
-  -e EXPECTED_USERNAME="44444444-4444-4444-4444-444444444444" \
-  -e OIDC_PROVIDER_DISPLAY_NAME="Sign in with Azure Entra ID" \
-  "$IMAGE" python /test/azure_sso_test.py
+  echo "==> running integration test (prefix='${label}')"
+  "$ENGINE" run --rm --network "$NET" \
+    -v "$ROOT_DIR/test:/test:$MOUNT_OPTS" \
+    -e MLFLOW_BASE="http://mlflow:5000" \
+    -e MLFLOW_STATIC_PREFIX="$prefix" \
+    -e OIDC_PROVIDER=default \
+    -e OIDC_GROUP_NAME="22222222-2222-2222-2222-222222222222" \
+    -e OIDC_ADMIN_GROUP_NAME="33333333-3333-3333-3333-333333333333" \
+    -e EXPECTED_USERNAME="44444444-4444-4444-4444-444444444444" \
+    -e OIDC_PROVIDER_DISPLAY_NAME="Sign in with Azure Entra ID" \
+    "$IMAGE" python /test/azure_sso_test.py
+}
+
+run_suite ""
+run_suite "/mlflow"
