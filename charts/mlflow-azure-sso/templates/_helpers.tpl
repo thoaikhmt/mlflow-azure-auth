@@ -25,6 +25,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
 {{- define "mlflow-azure-sso.selectorLabels" -}}
+app: {{ include "mlflow-azure-sso.name" . }}
 app.kubernetes.io/name: {{ include "mlflow-azure-sso.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
