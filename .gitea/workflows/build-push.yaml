@@ -7,14 +7,16 @@
 #
 # Every build also gets an immutable `sha-<short>` tag.
 #
-# The image is built with the daemon's own builder (plain `docker build`, NOT
-# `docker buildx` with a docker-container builder) with
-# `--provenance=false --sbom=false`, so the pushed manifest is a plain Docker
-# schema2 manifest: no OCI index and no `unknown/unknown` attestation. That is
-# what pull-through proxies such as Nexus need (an attestation makes them fail
-# with "could not fetch content descriptor ... not found"). The daemon builder
-# is also required here because BuildKit's separate docker-container builder in
-# this homelab cannot reach ghcr.io (TLS handshake timeout) while the daemon can.
+# The image is built with Docker's daemon builder (`DOCKER_BUILDKIT=0 docker
+# build` + `docker push`), which emits a plain Docker schema2 manifest: no OCI
+# index and no `unknown/unknown` provenance attestation. That is what
+# pull-through proxies such as Nexus need (an attestation makes them fail with
+# "could not fetch content descriptor ... not found").
+#
+# BuildKit is deliberately not used: in this homelab its registry resolver
+# cannot reach ghcr.io for the base image (`net/http: TLS handshake timeout`),
+# while the daemon's own pull path works. BuildKit is also what adds the OCI
+# index/attestations in the first place.
 name: build-and-push
 
 on:
@@ -55,10 +57,8 @@ jobs:
           esac
           short="$(echo "${{ github.sha }}" | cut -c1-7)"
           echo "==> pushing ${IMAGE}:${tag} and ${IMAGE}:sha-${short}"
-          docker build \
+          DOCKER_BUILDKIT=0 docker build \
             --file Containerfile \
-            --provenance=false \
-            --sbom=false \
             --tag "${IMAGE}:${tag}" \
             --tag "${IMAGE}:sha-${short}" \
             .
