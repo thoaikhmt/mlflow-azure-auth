@@ -136,12 +136,11 @@ than a separate `mlflow_oidc` schema:
 - set `OIDC_ALEMBIC_VERSION_TABLE=oidc_alembic_version` so the two Alembic
   histories do not collide on `alembic_version`.
 
-The schema must exist before either Alembic run; create it idempotently (the
-k3s deployment re-asserts this in an `ensure-mlflow-schema` init container):
-
-```sql
-CREATE SCHEMA IF NOT EXISTS mlflow AUTHORIZATION mlflow;
-```
+The schema must exist before either Alembic run. The k3s deployment re-asserts
+it in an `ensure-mlflow-schema` init container that runs a small Python script
+(`psycopg2`) before `mlflow server`: it creates the schema if missing and, once,
+drops the auth tables a previous MLflow basic-auth left behind (guarded on the
+plugin's own `oidc_alembic_version` table).
 
 ## In k3s
 
