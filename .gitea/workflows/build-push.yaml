@@ -36,6 +36,12 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          # Run the BuildKit container on the runner pod's network namespace.
+          # On the default docker bridge its egress to some registries (ghcr.io)
+          # hung with "net/http: TLS handshake timeout"; the pod network
+          # (flannel MTU 1450) reaches them fine.
+          driver-opts: network=host
 
       - name: Log in to Docker Hub
         run: |
