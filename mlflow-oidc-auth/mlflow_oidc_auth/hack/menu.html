@@ -27,15 +27,16 @@
         // ── Menu items to inject (order preserved) ──────────────────────
         // {label, href, icon} — icon key into ICONS / VIEWBOXES
         //
-        // The plugin serves its own routes (/oidc/ui, /logout, /login, ...) at
-        // the server root, NOT under MLflow's --static-prefix. These hrefs are
-        // therefore root-absolute: the previous relative "oidc/ui/user" /
-        // "logout" resolved against MLflow's page path and became
-        // /mlflow/oidc/ui/user, which 404'd.
+        // The plugin's fixed routes (/oidc/ui, /logout, /login, ...) live under
+        // the deployment's base path. ``__OIDC_BASE_PATH__`` is replaced by the
+        // server (hack.py) with the ASGI root_path: empty when MLflow serves at
+        // the domain root, or e.g. "/mlflow" when a proxy mounts it under a
+        // prefix. A hardcoded root-absolute href would 404 under a prefix, and a
+        // relative one resolves against MLflow's hash-routed page path.
         var MENU_ITEMS = [
             { label: null, href: "#", icon: "user" },
-            { label: "Permissions", href: "/oidc/ui/user", icon: "lock" },
-            { label: "Logout", href: "/logout", icon: "logout" }
+            { label: "Permissions", href: "__OIDC_BASE_PATH__/oidc/ui/user", icon: "lock" },
+            { label: "Logout", href: "__OIDC_BASE_PATH__/logout", icon: "logout" }
         ];
 
         // ── Helpers ─────────────────────────────────────────────────────

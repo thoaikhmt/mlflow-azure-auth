@@ -2,9 +2,11 @@
 # End-to-end integration test: the custom MLflow image + mlflow-oidc-auth
 # against a simulated Azure Entra ID (navikt/mock-oauth2-server).
 #
-# The suite runs twice: once bare and once with `--static-prefix=/mlflow`
-# (the way the k3s deployment serves MLflow), because the plugin keeps its
-# fixed routes at the server root while MLflow's UI/API move under the prefix.
+# The suite runs three ways: bare, under MLflow's `--static-prefix=/mlflow`,
+# and mounted via the ASGI `root_path` (`uvicorn --root-path /mlflow`, the way a
+# proxy that strips `/mlflow` serves it). The plugin keeps its fixed routes at
+# the server root under `--static-prefix`, but they move under the prefix when
+# the `root_path` is used, so the links the server emits must differ.
 #
 #   ./test/run-integration.sh              # podman or docker
 #   IMAGE=my/mlflow:test ./test/run-integration.sh
@@ -58,16 +60,18 @@ echo "==> starting simulated Azure Entra ID (mock-oauth2-server)"
   -e JSON_CONFIG_PATH=/config.json \
   "$MOCK_IMAGE" >/dev/null
 
-# Start MLflow (optionally with a static prefix), wait until healthy, then run
-# the test client on the same network.
+# Start MLflow (optionally with a static prefix or ASGI root_path), wait until
+# healthy, then run the test client on the same network.
 run_suite() {
   local prefix="$1"
-  local label="${prefix:-<none>}"
+  local root_path="$2"
+  local label="static-prefix='${prefix:-<none>}' root-path='${root_path:-<none>}'"
   local static_args=()
-  if [ -n "$prefix" ]; then static_args=(--static-prefix="$prefix"); fi
+  if [ -n "$prefix" ]; then static_args+=(--static-prefix="$prefix"); fi
+  if [ -n "$root_path" ]; then static_args+=(--uvicorn-opts="--root-path=$root_path"); fi
 
   echo
-  echo "==> MLflow suite: --static-prefix='${label}'"
+  echo "==> MLflow suite: ${label}"
   "$ENGINE" rm -f mlflow >/dev/null 2>&1 || true
   "$ENGINE" run -d --name mlflow --network "$NET" \
     -e OIDC_DISCOVERY_URL="http://mock-azure:8080/${TENANT}/.well-known/openid-configuration" \
@@ -84,6 +88,7 @@ run_suite() {
     -e OIDC_ALEMBIC_VERSION_TABLE=oidc_alembic_version \
     -e DEFAULT_MLFLOW_PERMISSION=MANAGE \
     -e AUTOMATIC_LOGIN_REDIRECT=true \
+    -e MLFLOW_GENAI_JUDGE_DEFAULT_MODEL="gateway:/default-judge" \
     -e SESSION_COOKIE_SECURE=false \
     -e SESSION_COOKIE_SAMESITE=lax \
     -e OIDC_USERS_DB_URI="sqlite:////tmp/oidc-auth.db" \
@@ -117,6 +122,7 @@ run_suite() {
     -v "$ROOT_DIR/test:/test:$MOUNT_OPTS" \
     -e MLFLOW_BASE="http://mlflow:5000" \
     -e MLFLOW_STATIC_PREFIX="$prefix" \
+    -e MLFLOW_ROOT_PATH="$root_path" \
     -e OIDC_PROVIDER=default \
     -e OIDC_GROUP_NAME="22222222-2222-2222-2222-222222222222" \
     -e OIDC_ADMIN_GROUP_NAME="33333333-3333-3333-3333-333333333333" \
@@ -125,5 +131,6 @@ run_suite() {
     "$IMAGE" python /test/azure_sso_test.py
 }
 
-run_suite ""
-run_suite "/mlflow"
+run_suite "" ""
+run_suite "/mlflow" ""
+run_suite "" "/mlflow"

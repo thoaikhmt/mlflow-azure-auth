@@ -1,0 +1,107 @@
+<script>
+    // Makes MLflow's AI Gateway / judge endpoint selectors default to the model
+    // named by MLFLOW_GENAI_JUDGE_DEFAULT_MODEL. The judge, guardrail and
+    // issue-detection dialogs auto-select the *first* endpoint returned by
+    //   GET ajax-api/3.0/mlflow/gateway/endpoints/list
+    // (the `autoSelectFirstEndpoint` prop), so we reorder that response and put
+    // the configured endpoint first. hack.py substitutes the value server-side
+    // (the literal below is replaced with a JSON string, or null when unset).
+    //
+    // Accepted forms:
+    //   "gateway:/my-endpoint"  -> endpoint named "my-endpoint"
+    //   "my-endpoint"           -> endpoint named "my-endpoint"
+    //   "databricks:/my-model"  -> endpoint whose model definition is
+    //                              provider=databricks, model_name=my-model
+    // Anything with no matching endpoint leaves the list untouched (the client
+    // cannot run a raw, non-gateway model from the UI).
+    (function () {
+        "use strict";
+
+        var configured = __OIDC_DEFAULT_JUDGE_MODEL__;
+        if (!configured || typeof configured !== "string" || typeof window.fetch !== "function") return;
+
+        var LIST_PATH = "gateway/endpoints/list";
+
+        // Split "<provider>:/<model>" the way MLflow does (first ":/", strip leading slashes).
+        function parseModelUri(uri) {
+            var idx = uri.indexOf(":/");
+            if (idx === -1) return null;
+            var provider = uri.slice(0, idx);
+            var name = uri.slice(idx + 2).replace(/^\/+/, "");
+            if (!provider || !name) return null;
+            return { provider: provider, name: name };
+        }
+
+        // The provider/model an endpoint calls, from its first model mapping.
+        function modelNameFor(endpoint) {
+            var mapping = endpoint && endpoint.model_mappings && endpoint.model_mappings[0];
+            if (!mapping) return null;
+            var def = mapping.model_definition || mapping;
+            if (!def || !def.model_name) return null;
+            return { provider: def.provider, name: def.model_name };
+        }
+
+        function isTargetEndpoint(endpoint) {
+            if (!endpoint || typeof endpoint.name !== "string") return false;
+
+            // gateway:/name, gateway://name or a bare endpoint name.
+            var gatewayName = configured.replace(/^gateway:\/+/i, "");
+            if (gatewayName !== configured) return endpoint.name === gatewayName;
+            if (configured.indexOf(":/") === -1) return endpoint.name === configured;
+
+            // <provider>:/<model>: match the endpoint's model definition.
+            var want = parseModelUri(configured);
+            var have = modelNameFor(endpoint);
+            return Boolean(want && have && want.provider === have.provider && want.name === have.name);
+        }
+
+        // Move the configured endpoint to the front; returns false when the list
+        // is untouched so the caller can return the original response.
+        function reorder(json) {
+            var endpoints = json && json.endpoints;
+            if (!Array.isArray(endpoints) || endpoints.length < 2) return false;
+            var target = -1;
+            for (var i = 0; i < endpoints.length; i++) {
+                if (isTargetEndpoint(endpoints[i])) { target = i; break; }
+            }
+            if (target <= 0) return false;
+            endpoints.unshift(endpoints.splice(target, 1)[0]);
+            return true;
+        }
+
+        var origFetch = window.fetch.bind(window);
+        window.fetch = function (input) {
+            var url = typeof input === "string" ? input : (input && input.url) || "";
+            var promise = origFetch.apply(this, arguments);
+            if (url.indexOf(LIST_PATH) === -1) return promise;
+
+            return promise.then(function (response) {
+                if (!response || !response.ok) return response;
+
+                var clone;
+                try {
+                    clone = response.clone();
+                } catch (e) {
+                    return response;
+                }
+
+                return clone.json().then(function (json) {
+                    if (!reorder(json)) return response;
+                    // Rebuild the response with only the content type; forwarding
+                    // the original content-length/content-encoding would describe
+                    // the old body and can break the read.
+                    var headers = new Headers();
+                    var contentType = response.headers.get("content-type");
+                    if (contentType) headers.set("content-type", contentType);
+                    return new Response(JSON.stringify(json), {
+                        status: response.status,
+                        statusText: response.statusText,
+                        headers: headers
+                    });
+                }).catch(function () {
+                    return response;
+                });
+            });
+        };
+    })();
+</script>

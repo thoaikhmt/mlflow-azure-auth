@@ -12,8 +12,9 @@ that MLflow:
   * grants admin from the Entra admin group,
   * refuses a user who is in no allowed group,
   * rejects unauthenticated API traffic,
-  * serves the plugin's React admin UI and injects a menu whose hrefs work under
-    a `--static-prefix`.
+  * serves the plugin's React admin UI and injects a menu whose hrefs carry the
+    deployment base path, whether MLflow runs under `--static-prefix` (plugin at
+    the root) or an ASGI `--root-path` (plugin under the prefix).
 
 The mock maps the login *username* to Entra claims (`groups`, `email`, ...) via
 ``test/mock-azure/config.json``; the tenant/issuer is shaped like a real Entra ID
@@ -30,12 +31,24 @@ import urllib.parse
 import requests
 
 MLFLOW = os.environ.get("MLFLOW_BASE", "http://mlflow:5000")
-# MLflow may run behind `--static-prefix` (the k3s deployment uses `/mlflow`).
-# MLflow's own UI/API move under the prefix, but the oidc-auth plugin's fixed
-# routes (`/login`, `/callback`, `/oidc/ui`, `/providers`, `/auth/status`) stay
-# at the server root, so the test uses two bases.
+# MLflow may run behind `--static-prefix`. MLflow's own UI/API move under the
+# prefix, but the oidc-auth plugin's fixed routes (`/login`, `/callback`,
+# `/oidc/ui`, `/providers`, `/auth/status`) stay at the server root.
 STATIC_PREFIX = os.environ.get("MLFLOW_STATIC_PREFIX", "").rstrip("/")
-API_BASE = f"{MLFLOW}{STATIC_PREFIX}"
+# Or MLflow may be mounted via the ASGI `root_path` (e.g. `uvicorn --root-path
+# /mlflow` behind a proxy that strips the prefix). Then the plugin's routes *do*
+# move under the prefix, so links the server emits must carry it.
+ROOT_PATH = os.environ.get("MLFLOW_ROOT_PATH", "").rstrip("/")
+# The prefix every link the server injects into MLflow's page must carry: the
+# ASGI root_path when mounted that way, otherwise empty (the plugin's routes are
+# at the server root under `--static-prefix`).
+MENU_BASE = ROOT_PATH
+# The prefix MLflow's own UI/API are public under: its static prefix, or the ASGI
+# root_path when only that is set.
+PUBLIC_PREFIX = STATIC_PREFIX or ROOT_PATH
+# Browser-facing base for MLflow's own routes (both `--static-prefix` and an ASGI
+# `root_path` expose them under the prefix).
+API_BASE = f"{MLFLOW}{PUBLIC_PREFIX}"
 PROVIDER = os.environ.get("OIDC_PROVIDER", "default")
 # Entra ID sends the group *object IDs* (GUIDs) in the `groups` claim.
 ALLOWED_GROUP = os.environ.get("OIDC_GROUP_NAME", "22222222-2222-2222-2222-222222222222")
@@ -175,16 +188,20 @@ def test_user_outside_allowed_group_is_refused() -> None:
 def test_admin_ui_and_menu_are_served() -> None:
     """The plugin's React admin UI must ship, and the injected menu must link to it.
 
-    Two regressions this guards:
+    Regressions this guards:
       * installing the plugin from a source archive omitted the git-ignored
         React build (``mlflow_oidc_auth/ui``), so every ``/oidc/ui/*`` request
         raised ``RuntimeError: UI directory not found`` (HTTP 500);
-      * ``hack/menu.html`` used relative ``oidc/ui/user`` / ``logout`` hrefs that
-        resolved under ``--static-prefix`` to ``/mlflow/oidc/ui/user`` (404).
+      * ``hack/menu.html`` hardcoded ``/oidc/ui/user`` / ``/logout`` hrefs, which
+        dropped the deployment's base path when MLflow was mounted via the ASGI
+        ``root_path`` (e.g. ``uvicorn --root-path /mlflow``), so the browser hit
+        ``/oidc/ui/user`` (404).
     """
     session, _ = start_login("alice")
 
-    ui = session.get(f"{MLFLOW}/oidc/ui/user")
+    # Fetch through the browser-facing path (with the proxy prefix), not the
+    # internal one, so a root_path deployment proves `/mlflow/oidc/ui/*` routes.
+    ui = session.get(f"{MLFLOW}{MENU_BASE}/oidc/ui/user")
     check("admin UI index is served", ui.status_code == 200, f"got {ui.status_code}: {ui.text[:120]}")
     check(
         "admin UI serves the React app",
@@ -192,19 +209,35 @@ def test_admin_ui_and_menu_are_served() -> None:
         ui.text[:200],
     )
 
-    config = session.get(f"{MLFLOW}/oidc/ui/config.json")
+    config = session.get(f"{MLFLOW}{MENU_BASE}/oidc/ui/config.json")
     check(
         "admin UI config reports the session",
         config.status_code == 200 and config.json().get("authenticated") is True,
         f"got {config.status_code}: {config.text[:120]}",
     )
+    if config.status_code == 200:
+        check(
+            "admin UI config carries the deployment base path",
+            config.json().get("uiPath") == f"{ROOT_PATH}/oidc/ui",
+            config.text[:200],
+        )
 
-    index = session.get(f"{API_BASE}/")
+    index = session.get(f"{MLFLOW}{PUBLIC_PREFIX}/")
     check("MLflow index is served with the injected menu", index.status_code == 200 and "Permissions" in index.text, f"got {index.status_code}")
     check(
-        "injected menu links to the plugin at the server root",
-        'href: "/oidc/ui/user"' in index.text and 'href: "/logout"' in index.text,
-        "menu hrefs must be root-absolute; relative ones resolve under the static prefix and 404",
+        "injected menu links to the plugin under the deployment base path",
+        f'href: "{MENU_BASE}/oidc/ui/user"' in index.text and f'href: "{MENU_BASE}/logout"' in index.text,
+        f'menu hrefs must carry the base path ({MENU_BASE or "root"}); a missing prefix 404s behind the proxy',
+    )
+    check(
+        "injected re-auth helper redirects to login under the deployment base path",
+        f'"{MENU_BASE}/login?next="' in index.text,
+        f'the re-auth redirect must target {MENU_BASE or "root"}/login, not /login',
+    )
+    check(
+        "injected default-model helper carries MLFLOW_GENAI_JUDGE_DEFAULT_MODEL",
+        '"gateway:/default-judge"' in index.text and "gateway/endpoints/list" in index.text,
+        "the endpoint selector should preload the configured default judge model",
     )
 
 

@@ -16,11 +16,10 @@
             // return the user to where they were. MLflow uses hash routing,
             // so the hash is essential — without it they'd land at the root.
             var next = window.location.pathname + window.location.search + window.location.hash;
-            var baseHref = (document.querySelector("base") || {}).getAttribute
-                ? document.querySelector("base").getAttribute("href")
-                : "/";
-            baseHref = (baseHref || "/").replace(/\/$/, "");
-            window.location.assign(baseHref + "/login?next=" + encodeURIComponent(next));
+            // The login endpoint lives under the deployment's base path. MLflow's
+            // page has no <base href>, so derive it from the server-injected
+            // ``__OIDC_BASE_PATH__`` (the ASGI root_path) rather than the DOM.
+            window.location.assign("__OIDC_BASE_PATH__/login?next=" + encodeURIComponent(next));
         }
 
         if (typeof window.fetch === "function") {

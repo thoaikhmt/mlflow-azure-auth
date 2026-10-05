@@ -50,7 +50,7 @@ stage (Vite writes to `mlflow_oidc_auth/ui`) and installs the plugin from the
 vendored source with those assets in place; a build-time assertion fails the
 build if `ui/index.html` is missing from the installed package.
 
-Two patches are carried on top of the vendored source:
+Patches are carried on top of the vendored source:
 
 - `mlflow_oidc_auth/routers/_prefix.py` — under `--static-prefix`,
   `_get_rest_path()` already includes the prefix, so the old code derived the
@@ -59,10 +59,25 @@ Two patches are carried on top of the vendored source:
   required"}` instead of being redirected to login. The fix strips the prefix
   before deriving the segment and prepends it to the resulting `/api` ·
   `/ajax-api` prefixes.
-- `mlflow_oidc_auth/hack/menu.html` — the injected menu used relative
-  `oidc/ui/user` / `logout` hrefs, which resolved against MLflow's page path and
-  became `/mlflow/oidc/ui/user` (404) and `/mlflow/logout`. The plugin's fixed
-  routes live at the server root, so the hrefs are now root-absolute.
+- `mlflow_oidc_auth/hack/menu.html` and `hack/reauth.html` — the injected menu
+  and re-auth helper hardcoded root-absolute hrefs (`/oidc/ui/user`,
+  `/logout`, `/login`). Those are right only when the plugin serves at the
+  domain root. When MLflow is mounted under a prefix with the ASGI `root_path`
+  (`uvicorn --root-path /mlflow`, behind a proxy that strips `/mlflow`), the
+  plugin's own routes move under that prefix too, so the browser hit
+  `/oidc/ui/user` (404). The snippets now carry a `__OIDC_BASE_PATH__` token
+  that `hack.py` substitutes, per request, with the deployment base path
+  (`request.script_root`): `/mlflow` behind such a proxy, empty otherwise
+  (e.g. under MLflow's `--static-prefix`, which keeps the plugin at the root).
+- `mlflow_oidc_auth/hack/default-model.html` (new) — MLflow's judge, guardrail
+  and issue-detection dialogs auto-select the **first** endpoint returned by
+  `GET ajax-api/3.0/mlflow/gateway/endpoints/list`, so a configured default was
+  ignored. The snippet is injected only when `MLFLOW_GENAI_JUDGE_DEFAULT_MODEL`
+  is set (via the plugin's config chain), patches `fetch`, and moves the
+  endpoint the value names to the front before the UI reads the list. Accepted
+  values: `gateway:/my-endpoint`, a bare `my-endpoint`, or
+  `<provider>:/<model>` (matched against the endpoint's model definition).
+  Disable with `EXTEND_MLFLOW_DEFAULT_MODEL=false`.
 
 Bump the vendored copy by re-syncing `mlflow-oidc-auth/` and re-applying the
 patches above.
@@ -97,7 +112,7 @@ is no separate email/first/last column), so configure:
 | ------------------------ | ------------------------------------- | ----- |
 | `oid`                    | `OIDC_USERNAME_FIELD=oid`             | Stable object id; survives UPN changes. |
 | `name`                   | `OIDC_DISPLAY_NAME_FIELD=name`        | Entra builds this from `given_name`/`family_name`; the plugin cannot store first/last separately. |
-| `groups` (object IDs)    | `OIDC_GROUP_NAME` / `OIDC_ADMIN_GROUP_NAME` | List the group **GUIDs** verbatim. |
+| `groups` (object IDs)    | `OIDC_GROUP_NAME` / `OIDC_ADMIN_GROUP_NAME` | List the group **GUIDs** verbatim, comma- or newline-separated. |
 | `email` / `upn` / `preferred_username` | *(not used)*          | Only relevant if you key accounts by email (`OIDC_USERNAME_FIELD=email,preferred_username,upn`). |
 
 For human-readable group names instead of GUIDs, set

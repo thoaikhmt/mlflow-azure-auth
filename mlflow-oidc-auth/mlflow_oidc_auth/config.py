@@ -219,6 +219,16 @@ class AppConfig:
         # any 401 response, so expired sessions trigger the IdP redirect flow instead
         # of leaving the user staring at empty SPA pages.
         self.EXTEND_MLFLOW_REAUTH = config_manager.get_bool("EXTEND_MLFLOW_REAUTH", default=True)
+        # Inject a small script that makes MLflow's AI Gateway / judge endpoint
+        # selectors default to the model named by MLFLOW_GENAI_JUDGE_DEFAULT_MODEL
+        # (when that names a gateway endpoint), instead of always selecting the
+        # first endpoint returned by the gateway API.
+        self.EXTEND_MLFLOW_DEFAULT_MODEL = config_manager.get_bool("EXTEND_MLFLOW_DEFAULT_MODEL", default=True)
+        # MLflow's own default-judge variable, read through the plugin's config
+        # chain so Vault/AWS/K8s providers work too. Unset (None) disables the UI
+        # default. Use "<provider>:/<model>" (e.g. "gateway:/my-endpoint") or a
+        # bare gateway endpoint name.
+        self.MLFLOW_GENAI_JUDGE_DEFAULT_MODEL = config_manager.get("MLFLOW_GENAI_JUDGE_DEFAULT_MODEL", None)
         self.DEFAULT_LANDING_PAGE_IS_PERMISSIONS = config_manager.get_bool("DEFAULT_LANDING_PAGE_IS_PERMISSIONS", default=True)
         self.AUTOMATIC_LOGIN_REDIRECT = config_manager.get_bool("AUTOMATIC_LOGIN_REDIRECT", default=False)
 

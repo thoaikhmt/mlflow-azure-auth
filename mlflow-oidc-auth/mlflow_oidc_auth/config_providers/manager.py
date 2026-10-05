@@ -7,6 +7,7 @@ flexible deployment across different environments (AWS, Azure, Kubernetes, local
 """
 
 import os
+import re
 import sys
 from importlib.metadata import entry_points
 from typing import Any
@@ -270,12 +271,12 @@ class ConfigManager:
     def get_list(self, key: str, default: list | None = None, separator: str = ",") -> list[str]:
         """Get a list configuration value.
 
-        Splits a string value by separator and strips whitespace.
+        Splits a string value by separator or newline and strips whitespace.
 
         Parameters:
             key: The configuration key.
             default: Value to return if not found.
-            separator: String to split on.
+            separator: String to split on (newlines are always accepted too).
 
         Returns:
             List of string values.
@@ -285,7 +286,7 @@ class ConfigManager:
             return default if default is not None else []
         if isinstance(value, list):
             return value
-        return [item.strip() for item in str(value).split(separator)]
+        return [item.strip() for item in re.split(rf"{re.escape(separator)}|\r?\n", str(value))]
 
     def refresh(self) -> None:
         """Refresh cached values from all providers.
