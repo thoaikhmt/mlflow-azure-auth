@@ -193,7 +193,7 @@ export const CreateUserTokenModal: React.FC<CreateUserTokenModalProps> = ({
           <p className="text-left text-text-primary dark:text-text-primary-dark">
             Tokens authenticate API and CLI calls as{" "}
             {owner === undefined ? "you" : owner}. Every token expires at the
-            end of the chosen day (UTC), at most one year from today.
+            end of the chosen day (UTC), at most ten years from today.
           </p>
           <Input
             id="user-token-name"

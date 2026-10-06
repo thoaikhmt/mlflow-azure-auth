@@ -1,6 +1,6 @@
 /** Shortest and longest lifetime, in whole UTC calendar days from today, a new token may have. */
 export const MIN_TOKEN_DAYS = 1;
-export const MAX_TOKEN_DAYS = 365;
+export const MAX_TOKEN_DAYS = 3650;
 /** Preselected lifetime for a new token. */
 export const DEFAULT_TOKEN_DAYS = 90;
 
@@ -11,7 +11,7 @@ const pad = (value: number): string => String(value).padStart(2, "0");
  *
  * The picker works in UTC calendar days because the expiration it produces is the end of that
  * UTC day. Using the viewer's local "today" instead would let someone east of UTC pick a day
- * whose end lies past the backend's one-year cap.
+ * whose end lies past the backend's ten-year cap.
  */
 export function utcDateAfter(now: Date, days: number): string {
   const date = new Date(

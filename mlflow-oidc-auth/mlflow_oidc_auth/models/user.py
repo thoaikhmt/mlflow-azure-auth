@@ -14,7 +14,7 @@ class CreateUserTokenRequest(BaseModel):
     """Request model for issuing a named access token (issue #189)."""
 
     name: str  # Unique among the user's tokens
-    expiration: str  # ISO 8601; required, at most one year away
+    expiration: str  # ISO 8601; required, at most ten years away
 
 
 class CreateUserRequest(BaseModel):

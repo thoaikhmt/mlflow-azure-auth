@@ -69,7 +69,7 @@ def _parse_expiration(value: Optional[str]) -> datetime:
     """Parse a requested token expiry, as an aware UTC datetime.
 
     Raises:
-        HTTPException: 400 when it is not ISO 8601, is in the past, or is more than a year away.
+        HTTPException: 400 when it is not ISO 8601, is in the past, or is more than ten years away.
     """
     expiration_str = value or ""
     # Handle ISO 8601 with 'Z' (UTC) at the end
@@ -89,7 +89,7 @@ def _parse_expiration(value: Optional[str]) -> datetime:
     if expiration <= now:
         raise HTTPException(status_code=400, detail="Expiration date must be in the future")
     if expiration > now + MAX_TOKEN_LIFETIME:
-        raise HTTPException(status_code=400, detail="Expiration date must be less than 1 year in the future")
+        raise HTTPException(status_code=400, detail="Expiration date must be less than 10 years in the future")
     return expiration
 
 
@@ -137,7 +137,7 @@ async def list_service_account_sources(admin_username: str = Depends(check_admin
     CREATE_ACCESS_TOKEN,
     summary="Create user access token",
     description="Issues a new 'default' access token for the authenticated user, replacing the previous one. "
-    "Admins may issue one for another user. The token expires at most one year from now. Requires a signed-in "
+    "Admins may issue one for another user. The token expires at most ten years from now. Requires a signed-in "
     "session: a request authenticated with an access token is refused.",
     dependencies=[Depends(require_interactive_login)],
 )

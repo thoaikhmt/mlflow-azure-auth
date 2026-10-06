@@ -70,8 +70,9 @@ DEFAULT_TOKEN_NAME = "default"
 #: bounds the table, and anything that lists it; twenty is more than any person or pipeline needs.
 MAX_LIVE_TOKENS_PER_USER = 20
 
-#: The longest lifetime a token may be issued with. One year, with a day of slack for time zones.
-MAX_TOKEN_LIFETIME = timedelta(days=366)
+#: The longest lifetime a token may be issued with. Ten years, with slack for leap years and time
+#: zones (10 x 366 days), so a date ten calendar years out is never refused.
+MAX_TOKEN_LIFETIME = timedelta(days=3660)
 
 #: ``last_used_at`` is refreshed at most this often per token. Writing it on every request would
 #: turn every basic-authenticated read into a write; to the minute is all an operator needs to
@@ -171,7 +172,7 @@ def _validate_expiry(expires_at: datetime, now: datetime) -> datetime:
     if expires_at <= now:
         raise MlflowException("the expiration must be in the future", INVALID_PARAMETER_VALUE)
     if expires_at > now + MAX_TOKEN_LIFETIME:
-        raise MlflowException("the expiration must be less than 1 year in the future", INVALID_PARAMETER_VALUE)
+        raise MlflowException("the expiration must be less than 10 years in the future", INVALID_PARAMETER_VALUE)
     return expires_at
 
 

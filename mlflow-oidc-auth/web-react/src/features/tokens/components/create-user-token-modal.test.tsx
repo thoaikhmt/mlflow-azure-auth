@@ -64,11 +64,11 @@ describe("CreateUserTokenModal", () => {
     vi.useRealTimers();
   });
 
-  it("limits the date picker to tomorrow ... one year and preselects a date", () => {
+  it("limits the date picker to tomorrow ... ten years and preselects a date", () => {
     renderModal();
     const date = screen.getByLabelText(/^Expires on/);
     expect(date).toHaveAttribute("min", "2026-09-29");
-    expect(date).toHaveAttribute("max", "2027-09-28");
+    expect(date).toHaveAttribute("max", "2036-09-25");
     expect(date).toHaveValue("2026-12-27");
     expect(screen.getByRole("button", { name: "Create token" })).toBeDisabled();
   });

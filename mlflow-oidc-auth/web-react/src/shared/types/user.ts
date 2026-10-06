@@ -68,7 +68,7 @@ export type UserTokenWithSecret = UserToken & {
 
 export type CreateUserTokenRequest = {
   name: string;
-  /** ISO 8601 timestamp; the backend caps it at one year from now. */
+  /** ISO 8601 timestamp; the backend caps it at ten years from now. */
   expiration: string;
 };
 

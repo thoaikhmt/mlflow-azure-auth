@@ -26,25 +26,25 @@ describe("token-expiration", () => {
     expect(utcDateAfter(now, 365)).toBe("2027-12-31");
   });
 
-  it("bounds the picker to tomorrow ... today + 365 days", () => {
+  it("bounds the picker to tomorrow ... today + 3650 days", () => {
     const now = new Date(Date.UTC(2026, 8, 28, 12));
     const bounds = tokenDateBounds(now);
     expect(bounds).toEqual({
       min: "2026-09-29",
-      max: "2027-09-28",
+      max: "2036-09-25",
       defaultValue: "2026-12-27",
     });
     expect(isWithinTokenDateBounds("2026-09-28", bounds)).toBe(false);
     expect(isWithinTokenDateBounds("2026-09-29", bounds)).toBe(true);
-    expect(isWithinTokenDateBounds("2027-09-28", bounds)).toBe(true);
-    expect(isWithinTokenDateBounds("2027-09-29", bounds)).toBe(false);
+    expect(isWithinTokenDateBounds("2036-09-25", bounds)).toBe(true);
+    expect(isWithinTokenDateBounds("2036-09-26", bounds)).toBe(false);
   });
 
-  it("keeps the latest allowed expiry within the backend's 366-day cap", () => {
+  it("keeps the latest allowed expiry within the backend's 3660-day cap", () => {
     const now = new Date(Date.UTC(2026, 8, 28, 0, 0, 1));
     const latest = endOfUtcDayIso(tokenDateBounds(now).max);
     expect(latest).not.toBeNull();
     const lifetimeMs = new Date(latest as string).getTime() - now.getTime();
-    expect(lifetimeMs).toBeLessThanOrEqual(366 * 24 * 60 * 60 * 1000);
+    expect(lifetimeMs).toBeLessThanOrEqual(3660 * 24 * 60 * 60 * 1000);
   });
 });
