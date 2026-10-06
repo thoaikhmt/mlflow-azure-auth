@@ -178,19 +178,46 @@ docker run --rm -p 5000:5000 \
 ### Non-interactive clients (pods, CI, training jobs)
 
 A pod in EKS (or any non-browser client) does **not** run the Entra SSO flow.
-It authenticates with a **named access token** issued for a user, presented as
-the password of HTTP basic auth (`username:token`):
+It authenticates with a **named access token** presented as the password of HTTP
+basic auth (`username:token`). All three steps below are done in the MLflow UI
+(served at `/oidc/ui`, the "Permissions" item in the MLflow menu) as an
+administrator.
 
-1. Sign in to the MLflow UI and create a token under the user's **Access
-   Tokens** (each has a name you choose and a mandatory expiry). The plaintext is
-   shown once.
-2. Point the pod at MLflow with those credentials, e.g.:
+**1. Create the identity and issue a token.**
 
-   ```bash
-   MLFLOW_TRACKING_URI=https://mlflow.example.com
-   MLFLOW_TRACKING_USERNAME=training-bot
-   MLFLOW_TRACKING_PASSWORD=mlf_<prefix>_<secret>
-   ```
+- Open **Users** (a person) or **Service Accounts** (an M2M identity — create one
+  with **Create Service Account**), then open the identity.
+- Open its **Tokens** tab and create a token (name it, set an expiry). The
+  plaintext `mlf_<prefix>_<secret>` is shown **once** — copy it now.
+
+**2. Grant permissions.**
+
+A new identity has no grants, and the default is deny-by-default, so tracking and
+prompt calls return 403 until it is granted. Grant a **regex pattern** once so
+every current and future experiment/prompt is covered, instead of per resource:
+
+- Open the identity's **Experiments** tab, toggle **Regex Mode** on, click
+  **Add New Regex Rule**, set Regex `.*`, Priority `0`, Permissions `EDIT` (use
+  `MANAGE` if the client must delete experiments) and save.
+- Open the **Prompts** tab (Regex Mode stays on) and add the same rule there.
+- Add rules on **Models** / **AI Endpoints** etc. if the client uses them.
+
+**3. Configure the pod.**
+
+```bash
+MLFLOW_TRACKING_URI=https://mlflow.example.com
+MLFLOW_TRACKING_USERNAME=training-bot        # plugin username, or a service-account name
+MLFLOW_TRACKING_PASSWORD=mlf_<prefix>_<secret>
+MLFLOW_TRACKING_INSECURE_TLS=true            # optional: accept a self-signed cert
+```
+
+`MLFLOW_TRACKING_USERNAME` is the name the plugin stored (the Entra `oid` GUID
+when `OIDC_USERNAME_FIELD=oid`, or the service-account name). Keep the token in a
+Kubernetes Secret. `MLFLOW_TRACKING_INSECURE_TLS` is a **client-side** variable
+read by the pod's MLflow client — setting it on the server has no effect. `true`
+makes the client skip certificate verification, so it connects whether the
+server's certificate is self-signed or CA-issued; prefer mounting the CA over
+disabling verification where you can.
 
 No Entra round trip is involved: the token is verified against the plugin's
 `user_tokens` table, then the normal per-resource permission checks apply.
