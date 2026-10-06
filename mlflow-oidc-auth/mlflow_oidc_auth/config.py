@@ -185,6 +185,13 @@ class AppConfig:
 
         self.PERMISSION_CACHE_TTL_SECONDS = config_manager.get_int("PERMISSION_CACHE_TTL_SECONDS", default=30)
 
+        # Access-token (HTTP basic) verification cache: remember a successful token check for a
+        # few seconds so polling pods skip the per-request DB lookup and hash check. TTL 0 disables.
+        self.OIDC_BASIC_AUTH_CACHE_TTL_SECONDS = config_manager.get_int("OIDC_BASIC_AUTH_CACHE_TTL_SECONDS", default=30)
+        self.OIDC_BASIC_AUTH_CACHE_MAX_SIZE = config_manager.get_int("OIDC_BASIC_AUTH_CACHE_MAX_SIZE", default=4096)
+        # Concurrent basic-auth verifications per process; 1 keeps the DB-pool guard, raise for cold bursts.
+        self.OIDC_BASIC_AUTH_WORKERS = config_manager.get_int("OIDC_BASIC_AUTH_WORKERS", default=1)
+
         # username source
         self.OIDC_USERNAME_FIELD = config_manager.get_list("OIDC_USERNAME_FIELD", default=["email", "preferred_username"])
         self.OIDC_DISPLAY_NAME_FIELD = config_manager.get_list("OIDC_DISPLAY_NAME_FIELD", default=["name"])

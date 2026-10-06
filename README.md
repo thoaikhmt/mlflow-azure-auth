@@ -175,6 +175,45 @@ docker run --rm -p 5000:5000 \
   `OIDC_REDIRECT_URI`, otherwise the callback URL is built from the internal
   address. For self-signed homelab certs set `OIDC_VERIFY_SSL=false`.
 
+### Non-interactive clients (pods, CI, training jobs)
+
+A pod in EKS (or any non-browser client) does **not** run the Entra SSO flow.
+It authenticates with a **named access token** issued for a user, presented as
+the password of HTTP basic auth (`username:token`):
+
+1. Sign in to the MLflow UI and create a token under the user's **Access
+   Tokens** (each has a name you choose and a mandatory expiry). The plaintext is
+   shown once.
+2. Point the pod at MLflow with those credentials, e.g.:
+
+   ```bash
+   MLFLOW_TRACKING_URI=https://mlflow.example.com
+   MLFLOW_TRACKING_USERNAME=training-bot
+   MLFLOW_TRACKING_PASSWORD=mlf_<prefix>_<secret>
+   ```
+
+No Entra round trip is involved: the token is verified against the plugin's
+`user_tokens` table, then the normal per-resource permission checks apply.
+
+Because a polling pod would otherwise pay a database lookup plus a hash check on
+every request, successful token verifications are cached in-process:
+
+| Env var | Default | Meaning |
+| ------- | ------- | ------- |
+| `OIDC_BASIC_AUTH_CACHE_TTL_SECONDS` | `30` | How long a successful token check is remembered. `0` disables the cache. |
+| `OIDC_BASIC_AUTH_CACHE_MAX_SIZE` | `4096` | Distinct credentials kept per process. |
+| `OIDC_BASIC_AUTH_WORKERS` | `1` | Concurrent first-time verifications per process. Raise for a large burst of cold clients. |
+
+Notes:
+
+- The cache is **per process** and keyed by a digest of `username:token`; the
+  plaintext token is never retained.
+- A token that is deleted or expires keeps working for at most the cache TTL.
+  Deactivating the account takes effect immediately (the per-request profile
+  lookup is unaffected).
+- The cache is a performance optimization, not a security boundary. Pods still
+  authenticate; they just skip Entra.
+
 ### Database schema
 
 The plugin shares MLflow's PostgreSQL database **and schema** (`mlflow`) rather

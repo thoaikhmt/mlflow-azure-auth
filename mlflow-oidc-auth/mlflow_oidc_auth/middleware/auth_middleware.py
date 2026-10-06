@@ -9,6 +9,7 @@ Authorization (what the user can do) is handled by RBACMiddleware.
 from typing import Optional, Tuple
 import asyncio
 import base64
+import hashlib
 import threading
 import time
 from contextvars import ContextVar
@@ -47,15 +48,46 @@ logger = get_logger()
 
 # Basic auth used to run synchronously on the ASGI event loop, which limited each worker to one
 # database/hash verification at a time while also blocking every unrelated request (issue #244).
-# The single-thread executor keeps that per-process concurrency bound when offloading: legacy
-# scrypt hashes are CPU-intensive, and an unauthenticated caller must not be able to fan out
-# enough concurrent verifications to exhaust the database pool.
-_BASIC_AUTH_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlflow-oidc-basic-auth")
+# The executor keeps that per-process concurrency bound when offloading: legacy scrypt hashes are
+# CPU-intensive, and an unauthenticated caller must not be able to fan out enough concurrent
+# verifications to exhaust the database pool. Successful verifications are cached below, so
+# widening it (OIDC_BASIC_AUTH_WORKERS) only matters for a burst of cold tokens.
+_BASIC_AUTH_EXECUTOR = ThreadPoolExecutor(max_workers=max(1, config.OIDC_BASIC_AUTH_WORKERS), thread_name_prefix="mlflow-oidc-basic-auth")
 
 
 def _authenticate_basic_auth_sync(username: str, password: str) -> bool:
     """Resolve the lazy store and verify one basic-auth credential in a worker thread."""
     return store.authenticate_user(username, password)
+
+
+# Successful basic-auth (access-token) verifications, cached for a short window so a polling pod
+# skips the per-request DB lookup and hash check. Keyed by a credential digest, never the token.
+# ``None`` when ``OIDC_BASIC_AUTH_CACHE_TTL_SECONDS`` is 0.
+_basic_auth_cache: Optional[TTLCache] = None
+_basic_auth_cache_guard = threading.Lock()
+if config.OIDC_BASIC_AUTH_CACHE_TTL_SECONDS > 0:
+    _basic_auth_cache = TTLCache(maxsize=max(1, config.OIDC_BASIC_AUTH_CACHE_MAX_SIZE), ttl=config.OIDC_BASIC_AUTH_CACHE_TTL_SECONDS)
+
+
+def _basic_auth_cache_key(username: str, password: str) -> str:
+    """A non-reversible cache key for a presented credential."""
+    return hashlib.sha256(f"{username}\x00{password}".encode("utf-8")).hexdigest()
+
+
+def _basic_auth_cache_hit(key: str) -> bool:
+    """Whether this credential verified successfully within the cache window."""
+    if _basic_auth_cache is None:
+        return False
+    with _basic_auth_cache_guard:
+        return key in _basic_auth_cache
+
+
+def _basic_auth_cache_remember(key: str) -> None:
+    """Remember a successful credential verification until the TTL elapses."""
+    if _basic_auth_cache is None:
+        return
+    with _basic_auth_cache_guard:
+        _basic_auth_cache[key] = True
 
 
 #: Set while authenticating when a bearer token came from a non-interactive provider (a Kubernetes
@@ -462,6 +494,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
             encoded_credentials = auth_header.split(" ", 1)[1]
             decoded_credentials = base64.b64decode(encoded_credentials).decode("utf-8")
             username, password = decoded_credentials.split(":", 1)
+            normalized_username = username.lower()
+
+            # A credential verified within the cache window skips the DB lookup and hash check.
+            cache_key = _basic_auth_cache_key(normalized_username, password)
+            if _basic_auth_cache_hit(cache_key):
+                logger.debug(f"User {normalized_username} authenticated via basic auth (cached)")
+                return True, normalized_username, ""
 
             # Store initialization, SQLAlchemy, and password verification are synchronous. Keep
             # them off the ASGI event loop; the dedicated executor preserves the previous
@@ -469,11 +508,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if await asyncio.get_running_loop().run_in_executor(
                 _BASIC_AUTH_EXECUTOR,
                 _authenticate_basic_auth_sync,
-                username.lower(),
+                normalized_username,
                 password,
             ):
+                _basic_auth_cache_remember(cache_key)
                 logger.debug(f"User {username} authenticated via basic auth")
-                return True, username.lower(), ""
+                return True, normalized_username, ""
             else:
                 return False, None, "Invalid basic auth credentials"
         except Exception as e:
