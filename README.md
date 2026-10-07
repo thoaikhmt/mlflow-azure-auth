@@ -255,6 +255,74 @@ PostgreSQL, creates the schema if missing and, once, drops the auth tables a
 previous MLflow basic-auth left behind (guarded on the plugin's own
 `oidc_alembic_version` table).
 
+## Default AI Gateway endpoint
+
+At startup the plugin can seed a **single default AI Gateway endpoint** from
+environment variables, so MLflow's judge / guardrail / issue-detection dialogs
+have an endpoint to work with on a fresh deployment. It mirrors the built-in
+"default workspace" seeder: it runs on every start, creates only the records that
+are missing, logs a warning instead of failing startup, and never raises.
+
+It writes three records through MLflow's native gateway store: a **secret**, a
+**model definition**, and an **endpoint** (PRIMARY linkage).
+
+### Recommended: reference an existing secret
+
+Create the secret once (MLflow UI → **AI Gateway → Secrets**, or an admin job) —
+provider, auth mode, `api_base` and credentials live there, encrypted at rest.
+Then the configuration carries **no credential material**:
+
+| Env var | Meaning |
+| ------- | ------- |
+| `MLFLOW_GATEWAY_DEFAULT_PROVIDER` | Gateway provider (`openai`, `anthropic`, `gemini`, `bedrock`, `databricks`, ...) |
+| `MLFLOW_GATEWAY_DEFAULT_MODEL` | Provider model id / deployment / serving endpoint name |
+| `MLFLOW_GATEWAY_DEFAULT_SECRET_NAME` | Name of the existing gateway secret to reference |
+| `MLFLOW_GATEWAY_DEFAULT_ENDPOINT` | Gateway endpoint name (optional) |
+
+```bash
+MLFLOW_GATEWAY_DEFAULT_PROVIDER=anthropic
+MLFLOW_GATEWAY_DEFAULT_MODEL=claude-sonnet-4-5
+MLFLOW_GATEWAY_DEFAULT_SECRET_NAME=corp-anthropic-key
+MLFLOW_GATEWAY_DEFAULT_ENDPOINT=corp-judge
+MLFLOW_GENAI_JUDGE_DEFAULT_MODEL=gateway:/corp-judge
+```
+
+If the named secret does not exist, seeding is skipped and startup logs a warning
+(no partial records).
+
+### Inline secret (dev / one-shot)
+
+Instead of naming a secret, create it from individual env vars — one per field,
+plain scalars (no JSON), so each can come from its own Kubernetes Secret key:
+
+- `MLFLOW_GATEWAY_DEFAULT_SECRET_<FIELD>` → secret value (e.g. `..._SECRET_API_KEY`)
+- `MLFLOW_GATEWAY_DEFAULT_AUTH_CONFIG_<FIELD>` → `auth_config` (e.g. `..._AUTH_CONFIG_API_BASE`)
+
+`<FIELD>` is case-insensitive (`API_KEY` → `api_key`). The endpoint name is
+`MLFLOW_GATEWAY_DEFAULT_ENDPOINT`, otherwise derived from
+`MLFLOW_GENAI_JUDGE_DEFAULT_MODEL` (`gateway:/corp-judge` → `corp-judge`).
+
+### Databricks shorthand
+
+`DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET` and
+`DATABRICKS_MODEL` are a shorthand for `provider=databricks` with OAuth M2M
+credentials; add `MLFLOW_GATEWAY_DEFAULT_SECRET_NAME` to reuse an existing
+secret instead of creating one. `MLFLOW_GATEWAY_DEFAULT_*` takes precedence over
+the shorthand.
+
+```bash
+DATABRICKS_HOST=https://adb-....azuredatabricks.net
+DATABRICKS_CLIENT_ID=<service-principal-id>
+DATABRICKS_CLIENT_SECRET=<service-principal-secret>
+DATABRICKS_MODEL=ds1-dev-apse-1-ml-endpoints-bedrock-claude-sonnet-4-5
+MLFLOW_GENAI_JUDGE_DEFAULT_MODEL=gateway:/corp-judge
+```
+
+With `MLFLOW_ENABLE_WORKSPACES=true` the endpoint and secret are created in the
+`default` workspace, so the secret must exist there.
+
+See `.env.example` for the full list.
+
 ## In k3s
 
 The homelab runs this image with a **simulated Entra ID** deployed in the
