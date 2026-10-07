@@ -27,6 +27,7 @@ SECRET_CLASSIFICATION: dict[str, SecretLevel] = {
     # Secrets - must be stored securely
     "SECRET_KEY": SecretLevel.SECRET,
     "OIDC_CLIENT_SECRET": SecretLevel.SECRET,
+    "OIDC_INTERNAL_AUTH_TOKEN": SecretLevel.SECRET,
     # Sensitive - should not be logged
     "OIDC_USERS_DB_URI": SecretLevel.SENSITIVE,
     "OIDC_CLIENT_ID": SecretLevel.SENSITIVE,

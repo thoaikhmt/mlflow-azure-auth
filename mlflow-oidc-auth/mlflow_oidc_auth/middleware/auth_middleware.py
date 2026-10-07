@@ -38,6 +38,8 @@ from mlflow.protos.databricks_pb2 import RESOURCE_DOES_NOT_EXIST, ErrorCode
 
 from mlflow_oidc_auth.audit import emit_audit_event
 from mlflow_oidc_auth.auth import validate_token
+from mlflow_oidc_auth.internal_job_auth import is_internal_job_password
+from mlflow_oidc_auth.session.resolution_cache import cache_session, get_cached_session, invalidate_session
 from mlflow_oidc_auth.store import store
 from mlflow_oidc_auth.utils.group_detection import call_group_detection_plugin
 from mlflow_oidc_auth.group_patterns import BY_PATTERN, admitting_rule, normalize_group_values
@@ -496,6 +498,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
             username, password = decoded_credentials.split(":", 1)
             normalized_username = username.lower()
 
+            # A server-spawned MLflow job subprocess presents the internal token as the basic-auth
+            # password and the trigger user's name as the username (see ``internal_job_auth``).
+            # Trust it without a token-store lookup; the dispatch below still checks that the user
+            # exists and is active, and every per-resource permission check still applies, so the
+            # job can only do what that user could.
+            if is_internal_job_password(password):
+                logger.debug("Internal MLflow job request authenticated as %s", normalized_username)
+                return True, normalized_username, ""
+
             # A credential verified within the cache window skips the DB lookup and hash check.
             cache_key = _basic_auth_cache_key(normalized_username, password)
             if _basic_auth_cache_hit(cache_key):
@@ -855,11 +866,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
                         # exactly the sessions that cannot be revoked.
                         return False, None, "No session authentication"
 
-                    resolved = store.resolve_auth_session(session_id)
+                    resolved = get_cached_session(session_id)
                     if resolved is None:
-                        # Unknown, revoked or expired — indistinguishable on purpose.
-                        session.clear()
-                        return False, None, "Session not recognised"
+                        # A cache miss pays the one join statement, run off the event loop: it is
+                        # synchronous database I/O, and running it inline would stall every other
+                        # request this worker is handling while the query is in flight.
+                        resolved = await asyncio.to_thread(store.resolve_auth_session, session_id)
+                        if resolved is None:
+                            # Unknown, revoked or expired — indistinguishable on purpose.
+                            session.clear()
+                            return False, None, "Session not recognised"
+                        # Remember it for the short window so the UI's request bursts skip the
+                        # statement; individual revocation and logout delete the entry.
+                        cache_session(session_id, resolved)
 
                     username = resolved.username
                     # Stash the resolved row so dispatch does not look the user up again. The
@@ -908,6 +927,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                             )
                             session.clear()
                             return False, None, "Session expired"
+                        # A refresh may have rotated the tokens on the row; drop the cached entry so
+                        # the next request re-resolves and reads the fresh blob instead of the old.
+                        invalidate_session(session_id)
                         logger.debug(f"Session for {username} refreshed against IdP")
 
                     logger.debug(f"User {username} authenticated via session")
@@ -1113,7 +1135,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                         )
                     return await self._deny(request, path)
             else:
-                is_admin, is_active, denial_reason, account = self._get_user_auth_facts(username)
+                # One profile lookup, off the event loop: it is synchronous database I/O and would
+                # otherwise stall the worker's other requests while the statement is in flight.
+                is_admin, is_active, denial_reason, account = await asyncio.to_thread(self._get_user_auth_facts, username)
                 if is_active:
                     method = _auth_method(request, workload_bearer=workload_bearer)
                     refusal = _service_account_denial(username, account[0], account[1], method, bearer_identity, is_admin)

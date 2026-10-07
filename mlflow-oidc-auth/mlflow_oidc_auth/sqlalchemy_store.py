@@ -80,6 +80,7 @@ from mlflow_oidc_auth.repository.workspace_group_regex_permission import (
     WorkspaceGroupRegexPermissionRepository,
 )
 from mlflow_oidc_auth.repository.workspace_rule import WorkspaceGroupRuleRepository
+from mlflow_oidc_auth.session.resolution_cache import invalidate_session
 
 
 class SqlAlchemyStore:
@@ -380,7 +381,12 @@ class SqlAlchemyStore:
 
     def store_auth_session_tokens(self, session_id: str, encrypted_tokens: Optional[str]) -> bool:
         """Replace a live session's encrypted provider tokens. True if it was updated (#367)."""
-        return self.auth_session_repo.store_tokens(session_id, encrypted_tokens)
+        updated = self.auth_session_repo.store_tokens(session_id, encrypted_tokens)
+        if updated:
+            # The cached row still holds the previous blob; drop it so the next request reads the
+            # fresh one instead of serving a spent token.
+            invalidate_session(session_id)
+        return updated
 
     def auth_session_refresh_guard(self, session_id: str):
         """Context manager holding exclusive refresh rights over one session (#367).
@@ -403,11 +409,20 @@ class SqlAlchemyStore:
 
     def revoke_auth_session(self, session_id: str) -> bool:
         """Revoke one session. True if it was live until now."""
-        return self.auth_session_repo.revoke(session_id)
+        revoked = self.auth_session_repo.revoke(session_id)
+        if revoked:
+            # Logout and a single-session revoke must take effect at once, not after the TTL.
+            invalidate_session(session_id)
+        return revoked
 
     def revoke_all_auth_sessions(self, username: str) -> int:
         """Revoke every live session for a user. Returns how many were revoked."""
-        return self.auth_session_repo.revoke_all_for_user(username)
+        count = self.auth_session_repo.revoke_all_for_user(username)
+        if count:
+            # Bulk revocation is not tracked per entry; clear the namespace so no cached session
+            # survives it.
+            invalidate_session(None)
+        return count
 
     def list_live_auth_session_details(self, username: str):
         """A user's live sessions for administration (#325). Never carries a full session id."""
@@ -415,7 +430,11 @@ class SqlAlchemyStore:
 
     def revoke_auth_session_by_pk(self, username: str, session_pk: int) -> bool:
         """Revoke one of ``username``'s sessions by row id. False if it is not a live session of theirs."""
-        return self.auth_session_repo.revoke_by_pk_for_user(username, session_pk)
+        revoked = self.auth_session_repo.revoke_by_pk_for_user(username, session_pk)
+        if revoked:
+            # The session id is not in hand here (only its row id); clear the namespace.
+            invalidate_session(None)
+        return revoked
 
     def list_live_auth_sessions_for_provider(self, username: str, provider_id: str):
         """``(session_id, encrypted_tokens)`` for a user's live sessions opened by one provider (#329)."""

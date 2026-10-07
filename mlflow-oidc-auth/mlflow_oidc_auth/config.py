@@ -79,6 +79,10 @@ class AppConfig:
 
         # Security settings (secrets - may come from Secrets Manager/Key Vault)
         _secret_key = config_manager.get("SECRET_KEY")
+        # Whether the key below is a per-process random fallback rather than a configured secret.
+        # A random key cannot be shared with the job subprocesses, so the internal job token is
+        # only derived when the key is stable (see ``internal_job_auth``).
+        self.SECRET_KEY_EPHEMERAL = not _secret_key
         if not _secret_key:
             logger.warning(
                 "SECRET_KEY is not configured — using a random key. "
@@ -191,6 +195,26 @@ class AppConfig:
         self.OIDC_BASIC_AUTH_CACHE_MAX_SIZE = config_manager.get_int("OIDC_BASIC_AUTH_CACHE_MAX_SIZE", default=4096)
         # Concurrent basic-auth verifications per process; 1 keeps the DB-pool guard, raise for cold bursts.
         self.OIDC_BASIC_AUTH_WORKERS = config_manager.get_int("OIDC_BASIC_AUTH_WORKERS", default=1)
+
+        # Session-resolution cache: remember a resolved browser session for a short window so the
+        # MLflow UI's request bursts (playground, evaluation, issue detection) skip the per-request
+        # ``resolve_auth_session`` database statement. TTL 0 disables it and re-resolves every
+        # request, the pre-cache behaviour with immediate revocation. Default matches the permission
+        # cache lifetime; bulk revocation takes effect within the TTL, individual revocation and
+        # logout are invalidated at once.
+        self.OIDC_SESSION_CACHE_TTL_SECONDS = config_manager.get_int("OIDC_SESSION_CACHE_TTL_SECONDS", default=30)
+        self.OIDC_SESSION_CACHE_MAX_SIZE = config_manager.get_int("OIDC_SESSION_CACHE_MAX_SIZE", default=4096)
+
+        # Internal MLflow job authentication. UI-triggered jobs (GenAI evaluation, issue
+        # detection, online scoring, prompt optimization) run in a process MLflow spawns and call
+        # back to this server; MLflow's job functions present a token as the basic-auth password
+        # when it is available, and this plugin supplies it. On by default (there is nothing to
+        # configure and no client can obtain the token); set OIDC_INTERNAL_AUTH_ENABLED=false to
+        # require credentials from every caller including job subprocesses.
+        self.OIDC_INTERNAL_AUTH_ENABLED = config_manager.get_bool("OIDC_INTERNAL_AUTH_ENABLED", default=True)
+        # Optional fixed token, for an operator who wants to pin the value (for example to share it
+        # with a job runner outside the server process) instead of deriving it from SECRET_KEY.
+        self.OIDC_INTERNAL_AUTH_TOKEN = config_manager.get("OIDC_INTERNAL_AUTH_TOKEN")
 
         # username source
         self.OIDC_USERNAME_FIELD = config_manager.get_list("OIDC_USERNAME_FIELD", default=["email", "preferred_username"])

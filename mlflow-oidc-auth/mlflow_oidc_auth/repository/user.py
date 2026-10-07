@@ -538,6 +538,11 @@ class UserRepository:
         if permitted_conflict is not None:
             _audit_ownership_conflict(username, permitted_conflict, written_by, allowed=True)
         if sessions_revoked:
+            # The deactivation revoked sessions above; drop cached resolutions so no session
+            # survives it for the cache TTL.
+            from mlflow_oidc_auth.session.resolution_cache import invalidate_session
+
+            invalidate_session(None)
             _audit_sessions_revoked(username, sessions_revoked, "user_deactivated")
         return entity
 
@@ -771,4 +776,8 @@ class UserRepository:
         if permitted_conflict is not None:
             _audit_ownership_conflict(username, permitted_conflict, written_by, allowed=True, operation="delete", actor=actor)
         if deleted_sessions:
+            # The account's sessions went with it; drop cached resolutions so none survives it.
+            from mlflow_oidc_auth.session.resolution_cache import invalidate_session
+
+            invalidate_session(None)
             _audit_sessions_revoked(username, deleted_sessions, "user_deleted")

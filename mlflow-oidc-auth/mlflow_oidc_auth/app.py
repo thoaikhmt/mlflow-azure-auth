@@ -19,6 +19,7 @@ from mlflow_oidc_auth.config import config
 from mlflow_oidc_auth.exceptions import register_exception_handlers
 from mlflow_oidc_auth.graphql import install_mlflow_graphql_authorization_middleware
 from mlflow_oidc_auth.hooks import after_request_hook, before_request_hook
+from mlflow_oidc_auth.internal_job_auth import install_internal_job_token
 from mlflow_oidc_auth.logger import get_logger
 from mlflow_oidc_auth.middleware import (
     AuthAwareWSGIMiddleware,
@@ -32,6 +33,11 @@ from mlflow_oidc_auth.oauth import ensure_all_clients_registered
 from mlflow_oidc_auth.routers import ajax_alias_router, get_all_routers
 
 logger = get_logger()
+
+# Export the internal job token at import time. MLflow's ``run_server`` imports this module in
+# the ``mlflow server`` parent (``_is_factory``) before it forks the ASGI workers and launches
+# the job runner, so setting the variable here is what makes it reach every job subprocess.
+install_internal_job_token()
 
 # Global flag to track OIDC initialization status for health checks
 _oidc_initialized: bool = False

@@ -239,6 +239,66 @@ Notes:
 - The cache is a performance optimization, not a security boundary. Pods still
   authenticate; they just skip Entra.
 
+### Internal job authentication (UI-triggered evaluation, scoring, issues)
+
+MLflow runs UI-triggered jobs — **Run judges / evaluation**, online scoring,
+issue detection, prompt optimization — in a process it spawns, which then calls
+the tracking server back with the MLflow client. Those callbacks carry no user
+session, so without help they fail with `Authentication required`.
+
+MLflow's job functions already know how to fix this: when it is available they
+present `_MLFLOW_INTERNAL_GATEWAY_AUTH_TOKEN` as the basic-auth password and the
+**name of the user who triggered the job** as the username
+(`mlflow/genai/evaluation/job.py`). MLflow only generates that token for its own
+`basic-auth` app, so this plugin supplies it:
+
+- on startup the plugin derives a token from `SECRET_KEY` and exports it, so
+  every job subprocess inherits it;
+- a request that presents it is authenticated as the named user **without** a
+  token-store lookup, and then goes through the normal per-resource permission
+  checks — the job can only do what that user could.
+
+The token never leaves the server: it is not returned to any client and not
+logged, and only processes the server itself started hold it. Keep `SECRET_KEY`
+configured (it is required for stable sessions anyway); with a per-process random
+key no token is derivable and the feature stays off.
+
+| Env var | Default | Meaning |
+| ------- | ------- | ------- |
+| `OIDC_INTERNAL_AUTH_ENABLED` | `true` | Trust job subprocesses. Set `false` to require credentials from every caller. |
+| `OIDC_INTERNAL_AUTH_TOKEN` | *(derived)* | Pin the token instead of deriving it from `SECRET_KEY` (for example to share it with an external job runner). Treat it as a secret. |
+
+### Faster UI requests (session-resolution cache)
+
+Once a user has signed in, every request from the MLflow UI is authenticated with
+the browser session. That ran one database statement per request
+(`resolve_auth_session`) to confirm the session row is live and to read the
+user's flags — negligible for a single call, but the **playground** and
+**evaluation** screens issue bursts of requests, so the pages felt slow even
+though per-resource permission decisions were already cached.
+
+The plugin now remembers the resolved session for a short window
+(`OIDC_SESSION_CACHE_TTL_SECONDS`, default 30s — the same lifetime as the
+permission caches), so those bursts skip the statement. The lookup also runs off
+the event loop, so a cache miss no longer stalls every other request the worker
+is handling.
+
+| Env var | Default | Meaning |
+| ------- | ------- | ------- |
+| `OIDC_SESSION_CACHE_TTL_SECONDS` | `30` | How long a resolved session is remembered. `0` disables the cache and re-resolves every request. |
+| `OIDC_SESSION_CACHE_MAX_SIZE` | `4096` | Distinct sessions kept per process (or in Redis). |
+
+Notes:
+
+- Logout, a single-session revoke, and a silent token refresh invalidate exactly
+  the affected entry, so they take effect immediately.
+- Bulk revocation — deactivating a user, deleting one, an administrator revoking
+  all sessions — takes effect within the TTL. Set the TTL to `0` if your policy
+  requires deactivation to deny on the very next request.
+- With the default local backend the cache is per process; use
+  `CACHE_BACKEND=redis` to share it (and the permission caches) across replicas.
+
+
 ### Database schema
 
 The plugin shares MLflow's PostgreSQL database **and schema** (`mlflow`) rather
