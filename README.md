@@ -22,13 +22,13 @@ test/azure_sso_test.py     the assertions (login, groups, admin, denials, UI)
 ## Image
 
 ```
-docker.io/thoaikhmt/mlflow-azure-auth:v1.0.0
+docker.io/thoaikhmt/mlflow-azure-auth:v1.2.0
 ```
 
 Built and pushed by the `.github/workflows/build-push.yaml` workflow (mirrored
 in `.gitea/workflows/build-push.yaml` for the self-hosted Gitea): every push to
 `main` publishes `:latest`, and every `v*` git tag publishes an image with the
-same name as the tag (the first release is `v1.0.0`). It is the official
+same name as the tag (the current release is `v1.2.0`). It is the official
 `ghcr.io/mlflow/mlflow:v3.16.1-full` image plus:
 
 | Component          | Version |
@@ -149,7 +149,7 @@ docker run --rm -p 5000:5000 \
   -e OIDC_USERS_DB_URI="postgresql+psycopg2://mlflow:pass@db:5432/mlflow" \
   -e OIDC_ALEMBIC_VERSION_TABLE="oidc_alembic_version" \
   -e SECRET_KEY="$(openssl rand -hex 32)" \
-  thoaikhmt/mlflow-azure-auth:v1.0.0 \
+  thoaikhmt/mlflow-azure-auth:v1.2.0 \
   mlflow server --app-name oidc-auth --host 0.0.0.0 --port 5000 \
     --backend-store-uri postgresql:// --default-artifact-root s3://mlflow/
 ```
