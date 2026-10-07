@@ -136,6 +136,152 @@ def _seed_default_workspace() -> None:
         logger.warning(f"Could not seed default workspace: {e}")
 
 
+# Username recorded as the creator/updater of resources the startup seeder writes.
+_GATEWAY_SEEDER_PRINCIPAL = "mlflow-oidc-auth"
+
+
+def _gateway_endpoint_name_from_selector(selector: str | None) -> str | None:
+    """Derive a gateway endpoint name from ``MLFLOW_GENAI_JUDGE_DEFAULT_MODEL``.
+
+    Accepts the same values the default-model UI injection accepts:
+    ``gateway:/<endpoint>``, a bare ``<endpoint>``, or ``<provider>:/<model>``.
+    The segment after ``:/`` (or the whole value when there is none) is used.
+    """
+    if not selector:
+        return None
+    value = selector.strip()
+    if ":/" in value:
+        value = value.split(":/", 1)[1].strip()
+    return value or None
+
+
+def _default_workspace_context():
+    """Scope gateway-store writes to the default workspace when workspaces are on.
+
+    MLflow's workspace-aware store resolves an active workspace for server-side
+    writes; at startup there is no request, so bind the context explicitly. When
+    workspaces are disabled (or ``ServerWorkspaceContext`` is unavailable) this is
+    a no-op.
+    """
+    import contextlib
+
+    if not config.MLFLOW_ENABLE_WORKSPACES:
+        return contextlib.nullcontext()
+    try:
+        from mlflow.utils.workspace_context import ServerWorkspaceContext
+
+        return ServerWorkspaceContext("default")
+    except Exception:
+        return contextlib.nullcontext()
+
+
+def _ensure_gateway_secret(store, secret_name: str, host: str, client_id: str, client_secret: str):
+    """Return the named Databricks OAuth-M2M secret, creating it if missing."""
+    try:
+        return store.get_secret_info(secret_name=secret_name)
+    except Exception:
+        return store.create_gateway_secret(
+            secret_name=secret_name,
+            # ``client_secret`` is the credential MLflow's Databricks provider reads
+            # from the encrypted value; ``client_id``/``api_base`` live in auth_config.
+            secret_value={"client_secret": client_secret},
+            provider="databricks",
+            auth_config={
+                "auth_mode": "oauth_m2m",
+                "client_id": client_id,
+                "api_base": host,
+            },
+            created_by=_GATEWAY_SEEDER_PRINCIPAL,
+        )
+
+
+def _ensure_gateway_model_definition(store, name: str, secret_id: str, model_name: str):
+    """Return the named Databricks model definition, creating it if missing."""
+    try:
+        return store.get_gateway_model_definition(name=name)
+    except Exception:
+        return store.create_gateway_model_definition(
+            name=name,
+            secret_id=secret_id,
+            provider="databricks",
+            model_name=model_name,
+            created_by=_GATEWAY_SEEDER_PRINCIPAL,
+        )
+
+
+def _seed_default_gateway_endpoint() -> None:
+    """Seed a default Databricks AI Gateway endpoint from environment variables.
+
+    Mirrors ``_seed_default_workspace``: runs at every startup, creates only the
+    records that are missing in MLflow's native gateway store, and never raises.
+
+    Environment variables (all required, seeding is skipped when any is unset):
+        DATABRICKS_HOST                  Databricks workspace URL.
+        DATABRICKS_CLIENT_ID             Service-principal client id.
+        DATABRICKS_CLIENT_SECRET         Service-principal client secret.
+        DATABRICKS_MODEL                 Databricks serving endpoint to expose.
+        MLFLOW_GENAI_JUDGE_DEFAULT_MODEL Endpoint selector, e.g. "gateway:/corp-judge".
+    """
+    import os
+
+    host = os.environ.get("DATABRICKS_HOST")
+    client_id = os.environ.get("DATABRICKS_CLIENT_ID")
+    client_secret = os.environ.get("DATABRICKS_CLIENT_SECRET")
+    model_name = os.environ.get("DATABRICKS_MODEL")
+    endpoint_name = _gateway_endpoint_name_from_selector(config.MLFLOW_GENAI_JUDGE_DEFAULT_MODEL)
+
+    missing = [
+        var
+        for var, value in (
+            ("DATABRICKS_HOST", host),
+            ("DATABRICKS_CLIENT_ID", client_id),
+            ("DATABRICKS_CLIENT_SECRET", client_secret),
+            ("DATABRICKS_MODEL", model_name),
+            ("MLFLOW_GENAI_JUDGE_DEFAULT_MODEL", endpoint_name),
+        )
+        if not value
+    ]
+    if missing:
+        logger.debug("Skipping default gateway endpoint seeding; not set: %s", ", ".join(missing))
+        return
+
+    from mlflow.entities import GatewayEndpointModelConfig
+    from mlflow.entities.gateway_endpoint import GatewayModelLinkageType
+    from mlflow.server.handlers import _get_tracking_store
+
+    secret_name = f"{endpoint_name}-secret"
+    model_definition_name = f"{endpoint_name}-model"
+
+    try:
+        store = _get_tracking_store()
+
+        with _default_workspace_context():
+            # Create-only if the endpoint already exists (idempotent across replicas/restarts).
+            try:
+                store.get_gateway_endpoint(name=endpoint_name)
+                logger.debug(f"Default gateway endpoint '{endpoint_name}' already exists")
+                return
+            except Exception:
+                pass
+
+            secret = _ensure_gateway_secret(store, secret_name, host, client_id, client_secret)
+            model_definition = _ensure_gateway_model_definition(store, model_definition_name, secret.secret_id, model_name)
+            store.create_gateway_endpoint(
+                name=endpoint_name,
+                model_configs=[
+                    GatewayEndpointModelConfig(
+                        model_definition_id=model_definition.model_definition_id,
+                        linkage_type=GatewayModelLinkageType.PRIMARY,
+                        weight=1.0,
+                    )
+                ],
+                created_by=_GATEWAY_SEEDER_PRINCIPAL,
+            )
+            logger.info(f"Default gateway endpoint '{endpoint_name}' created")
+    except Exception as e:
+        logger.warning(f"Could not seed default gateway endpoint: {e}")
+
+
 def _include_router(oidc_app: FastAPI, router: APIRouter) -> None:
     """Register a router, plus the "/ajax-api" twins of its "/api" routes.
 
@@ -314,6 +460,11 @@ def create_app() -> FastAPI:
 
         _include_router(oidc_app, workspace_permissions_router)
         _include_router(oidc_app, workspace_regex_permissions_router)
+
+    # Seed a default Databricks AI Gateway endpoint (secret + model definition +
+    # endpoint) from env when configured. Runs on every start, creates only what is
+    # missing, and never raises — like _seed_default_workspace() above.
+    _seed_default_gateway_endpoint()
 
     # ---------------------------------------------------------------------------
     # Include MLflow's FastAPI-native routers (GAP-ARCH-01 fix)
