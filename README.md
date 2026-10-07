@@ -16,7 +16,6 @@ test/mock-azure/config.json  simulated Entra ID tenant
 test/run-integration.sh    spins up MLflow + the mock and runs the test
 test/azure_sso_test.py     the assertions (login, groups, admin, denials, UI)
 .github/workflows/         build and push the image to Docker Hub (GitHub Actions)
-.gitea/workflows/          the same job for the self-hosted Gitea mirror
 ```
 
 ## Image
@@ -25,9 +24,8 @@ test/azure_sso_test.py     the assertions (login, groups, admin, denials, UI)
 docker.io/thoaikhmt/mlflow-azure-auth:v1.2.0
 ```
 
-Built and pushed by the `.github/workflows/build-push.yaml` workflow (mirrored
-in `.gitea/workflows/build-push.yaml` for the self-hosted Gitea): every push to
-`main` publishes `:latest`, and every `v*` git tag publishes an image with the
+Built and pushed by the `.github/workflows/build-push.yaml` workflow: every push
+to `main` publishes `:latest`, and every `v*` git tag publishes an image with the
 same name as the tag (the current release is `v1.2.0`). It is the official
 `ghcr.io/mlflow/mlflow:v3.16.1-full` image plus:
 

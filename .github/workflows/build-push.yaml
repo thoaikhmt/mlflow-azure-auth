@@ -13,10 +13,6 @@
 # index and no `unknown/unknown` provenance attestation. That is what
 # pull-through proxies such as Nexus need (an attestation makes them fail with
 # "could not fetch content descriptor ... not found").
-#
-# This mirrors `.gitea/workflows/build-push.yaml`; the only difference is that
-# GitHub's runner image already trusts the public registries, so the
-# Gitea-specific `GIT_SSL_NO_VERIFY` workaround is not needed here.
 name: build-and-push
 
 on:
