@@ -1,9 +1,9 @@
-# Build the custom MLflow image (official mlflow:v3.16.1-full + the vendored
+# Build the custom MLflow image (official mlflow:v3.17.0-full + the vendored
 # mlflow-oidc-auth plugin) and push it to Docker Hub.
 #
 #   * push to `main`      -> docker.io/thoaikhmt/mlflow-azure-auth:latest
 #   * push a `v*` git tag -> docker.io/thoaikhmt/mlflow-azure-auth:<tag>
-#                             (release: v1.2.0)
+#                             (release: v1.2.3)
 #
 # Only those tags are pushed: `latest` is moved on every main build, and a tag
 # build publishes the tag name once. No `sha-<short>` tags.

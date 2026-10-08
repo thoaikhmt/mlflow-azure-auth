@@ -13,7 +13,7 @@ params name, so a non-admin submission is authorized against them, per job funct
   absent or the caller.
 
 A job function not listed here, a parameter a job function does not declare, or a value of
-the wrong type denies. This covers the job functions MLflow 3.16.1 allows
+the wrong type denies. This covers the job functions MLflow 3.17.0 allows
 (``mlflow.server.jobs._ALLOWED_JOB_NAME_LIST``); one added by a later release, or through
 ``_MLFLOW_ALLOWED_JOB_NAME_LIST``, is admin-only until it is classified here.
 """

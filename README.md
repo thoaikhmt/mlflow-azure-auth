@@ -10,7 +10,7 @@ a **simulated Entra ID** service plus an end-to-end integration test that drives
 the real Authorization Code + PKCE flow.
 
 ```
-Containerfile              official mlflow:v3.16.1-full + vendored mlflow-oidc-auth
+Containerfile              official mlflow:v3.17.0-full + vendored mlflow-oidc-auth
 mlflow-oidc-auth/          vendored plugin source (see "Vendored plugin" below)
 test/mock-azure/config.json  simulated Entra ID tenant
 test/run-integration.sh    spins up MLflow + the mock and runs the test
@@ -21,17 +21,17 @@ test/azure_sso_test.py     the assertions (login, groups, admin, denials, UI)
 ## Image
 
 ```
-docker.io/thoaikhmt/mlflow-azure-auth:v1.2.0
+docker.io/thoaikhmt/mlflow-azure-auth:v1.2.3
 ```
 
 Built and pushed by the `.github/workflows/build-push.yaml` workflow: every push
 to `main` publishes `:latest`, and every `v*` git tag publishes an image with the
-same name as the tag (the current release is `v1.2.0`). It is the official
-`ghcr.io/mlflow/mlflow:v3.16.1-full` image plus:
+same name as the tag (the current release is `v1.2.3`). It is the official
+`ghcr.io/mlflow/mlflow:v3.17.0-full` image plus:
 
 | Component          | Version |
 | ------------------ | ------- |
-| MLflow             | 3.16.1 (pinned, `-full`) |
+| MLflow             | 3.17.0 (pinned, `-full`) |
 | mlflow-oidc-auth   | vendored (`mlflow-oidc-auth/`) |
 | psycopg2 / boto3   | from the `-full` base |
 
@@ -147,7 +147,7 @@ docker run --rm -p 5000:5000 \
   -e OIDC_USERS_DB_URI="postgresql+psycopg2://mlflow:pass@db:5432/mlflow" \
   -e OIDC_ALEMBIC_VERSION_TABLE="oidc_alembic_version" \
   -e SECRET_KEY="$(openssl rand -hex 32)" \
-  thoaikhmt/mlflow-azure-auth:v1.2.0 \
+  thoaikhmt/mlflow-azure-auth:v1.2.3 \
   mlflow server --app-name oidc-auth --host 0.0.0.0 --port 5000 \
     --backend-store-uri postgresql:// --default-artifact-root s3://mlflow/
 ```

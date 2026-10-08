@@ -12,7 +12,7 @@ _GATEWAY_PROVIDER = "gateway"
 
 
 def _fallback_parse(model_uri: str) -> tuple[str, str]:
-    # Same logic as mlflow.metrics.genai.model_utils._parse_model_uri (MLflow 3.16.1).
+    # Same logic as mlflow.metrics.genai.model_utils._parse_model_uri (MLflow 3.17.0).
     parts = model_uri.split(":/", 1)
     if len(parts) != 2 or not parts[0] or not parts[1].lstrip("/"):
         raise ValueError("malformed model uri")
