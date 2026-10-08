@@ -1,3 +1,4 @@
+import base64
 import re
 from typing import Any, Callable, Dict, Optional
 
@@ -1003,6 +1004,31 @@ def _find_validator(req: Request) -> Optional[Callable[[str], bool]]:
     )
 
 
+def _expose_authenticated_user_as_basic_auth(username: str) -> None:
+    """Make the authenticated user readable as ``request.authorization`` for MLflow handlers.
+
+    MLflow's UI-only job handlers — ``_invoke_genai_evaluate_handler`` ("Run judges") and
+    ``_invoke_scorer_handler`` — read ``request.authorization.username`` to record who triggered
+    the job and to pass that name into the job subprocess, which then authenticates its callbacks
+    as that user (see ``internal_job_auth``). With OIDC the browser authenticates with a session
+    cookie, so there is no ``Authorization`` header, the username reads back as ``None``, and the
+    subprocess calls the server with no credential and is refused with "Authentication required".
+
+    This fills in the identity the authentication middleware already established. A Basic header
+    that already names a user is left untouched (a service account's own token). The password is a
+    non-secret placeholder on purpose: MLflow reads only the username here, and the subprocess's
+    real credential is the internal job token taken from its environment, never this header.
+    """
+    existing = request.authorization
+    if existing is not None and getattr(existing, "username", None):
+        return
+    encoded = base64.b64encode(f"{username}:mlflow-oidc-auth".encode("utf-8")).decode("ascii")
+    request.environ["HTTP_AUTHORIZATION"] = f"Basic {encoded}"
+    # ``authorization`` is a cached_property; drop whatever it cached above so the next reader
+    # parses the header just set instead of the absence it saw first.
+    request.__dict__.pop("authorization", None)
+
+
 def before_request_hook():
     """Called before each request. If it did not return a response,
     the view function for the matched route is called and returns a response"""
@@ -1021,6 +1047,9 @@ def before_request_hook():
     # back to client-supplied values when it is unset. No database access.
     if getattr(g, "mlflow_authenticated_user", None) is None:
         g.mlflow_authenticated_user = username
+    # MLflow's job handlers read the trigger user from ``request.authorization.username``; a
+    # cookie-authenticated UI request has none, so surface the resolved identity before the view.
+    _expose_authenticated_user_as_basic_auth(username)
 
     logger.debug(f"Before request hook called for path: {request.path}, method: {request.method}, username: {username}, is admin: {is_admin}")
     validator = _find_validator(request)
